@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"log/slog"
 	"net"
 	"strconv"
@@ -33,7 +34,7 @@ func ScanTLS(host Host, out chan<- string, geo *Geo) {
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"h2", "http/1.1"},
-		CurvePreferences:   []tls.CurveID{tls.X25519},
+		CurvePreferences:   []tls.CurveID{tls.X25519, tls.X25519MLKEM768},
 	}
 	if host.Type == HostTypeDomain {
 		tlsCfg.ServerName = host.Origin
@@ -48,6 +49,15 @@ func ScanTLS(host Host, out chan<- string, geo *Geo) {
 	alpn := state.NegotiatedProtocol
 	domain := state.PeerCertificates[0].Subject.CommonName
 	issuers := strings.Join(state.PeerCertificates[0].Issuer.Organization, " | ")
+	length := 0
+	var leaf *x509.Certificate
+	for _, cert := range state.PeerCertificates {
+		length += len(cert.Raw)
+		if len(cert.DNSNames) != 0 {
+			leaf = cert
+		}
+	}
+
 	log := slog.Info
 	feasible := true
 	geoCode := geo.GetGeo(host.IP)
@@ -56,11 +66,29 @@ func ScanTLS(host Host, out chan<- string, geo *Geo) {
 		log = slog.Debug
 		feasible = false
 	} else {
-		out <- strings.Join([]string{host.IP.String(), host.Origin, domain, "\"" + issuers + "\"", geoCode}, ",") +
-			"\n"
+		out <- strings.Join([]string{
+			host.IP.String(), 
+			host.Origin, 
+			tls.VersionName(state.Version), 
+			alpn,
+			state.CurveID.String(),
+			strconv.Itoa(length) + "(certs count: " + strconv.Itoa(len(state.PeerCertificates)) + ")",
+			leaf.SignatureAlgorithm.String(),
+			leaf.PublicKeyAlgorithm.String(),
+			domain, 
+			"\"" + issuers + "\"", 
+			geoCode}, ",") + "\n"
 	}
-	log("Connected to target", "feasible", feasible, "ip", host.IP.String(),
+	log("Connected to target", "feasible", feasible, 
+		"ip", host.IP.String(),
 		"origin", host.Origin,
-		"tls", tls.VersionName(state.Version), "alpn", alpn, "cert-domain", domain, "cert-issuer", issuers,
+		"tls", tls.VersionName(state.Version), 
+		"alpn", alpn, 
+		"curve", state.CurveID.String(),
+		"cert-length", strconv.Itoa(length) + "(certs count: " + strconv.Itoa(len(state.PeerCertificates)) + ")",
+		"cert-signature", leaf.SignatureAlgorithm.String(),
+		"cert-publickey", leaf.PublicKeyAlgorithm.String(),
+		"cert-domain", domain, 
+		"cert-issuer", issuers,
 		"geo", geoCode)
 }
