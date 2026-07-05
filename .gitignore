@@ -6,3 +6,8 @@ RealiTLScanner.exe
 # All CSV and TXT files
 *.csv
 *.txt
+
+
+# Added by cargo
+
+/target

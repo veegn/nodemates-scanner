@@ -1,10 +1,26 @@
-FROM golang:1.26-alpine AS build
-WORKDIR /src
-COPY . .
-RUN go build -o RealiTLScanner .
+# Build stage
+FROM rust:1.80-slim as builder
 
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates
+WORKDIR /usr/src/app
+COPY . .
+
+# Build the release binary
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install ca-certificates (useful if you ever need outbound HTTPS requests)
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-COPY --from=build /src/RealiTLScanner .
-ENTRYPOINT ["./RealiTLScanner"]
+
+# Copy the compiled binary and static files from the builder stage
+COPY --from=builder /usr/src/app/target/release/nodemates-scanner /app/nodemates-scanner
+COPY --from=builder /usr/src/app/static /app/static
+
+# Expose the web service port
+EXPOSE 3000
+
+# Run the binary
+ENTRYPOINT ["/app/nodemates-scanner"]

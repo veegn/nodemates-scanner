@@ -1,90 +1,71 @@
-# Reality - TLS - Scanner
+# nodemates-scanner
 
-## Building
+An advanced, high-performance web-based utility for asynchronous TLS probing and Reality node verification. Fully rewritten in Rust (Axum + Tokio) to provide unparalleled concurrency, real-time WebSocket feedback, and robust abuse-prevention.
 
-Requirement: Go 1.21+
+## Key Features
 
-```bash
-go build
-```
+- ⚡ **Pure Asynchronous Rust**: Built on `tokio`, `axum`, and `tokio-rustls` for blazingly fast concurrent scanning.
+- 🎨 **Apple-inspired Web UI**: Modern, glassmorphism-themed interface with dark mode and micro-animations.
+- 🌐 **Bilingual Support**: Pure frontend i18n supporting both English and Chinese (zh/en), automatically detecting user language with a manual toggle.
+- 📡 **Multi-Port Scanning**: Concurrently sniff across multiple common SSL ports (443, 8443, 2053, 2083, 2087, 2096).
+- 🌍 **Real-time GeoIP**: MaxMind GeoLite2 integration to identify server locations instantly.
+- 🛡️ **Anti-abuse & Rate Limiting**: 30-day target locking on completed CIDRs/IPs to prevent scanning abuse, powered by an internal SQLite database.
+- ⏯️ **Breakpoint Resumption**: Automatically saves progress on large CIDR scans. If a scan is stopped or interrupted, it can resume precisely where it left off.
+- ⏱️ **Hourly Health Checks**: A built-in cron job runs hourly to re-verify stored feasible nodes, automatically updating dead endpoints.
 
-## Usage
+## Building & Running
 
-It is recommended to run this tool locally, as running the scanner in the cloud may cause the VPS to be flagged.
-```bash
-# Show help
-./RealiTLScanner
+### Requirements
+- Rust (Cargo) 1.70+
+- SQLite (included with standard libraries via `sqlx`)
 
-# Scan a specific IP, IP CIDR or domain:
-./RealiTLScanner -addr 1.2.3.4
-# Note: infinity mode will be enabled automatically if `addr` is an IP or domain
+### Run Locally (Recommended)
 
-# Scan a list of targets from a file (targets should be divided by line break):
-./RealiTLScanner -in in.txt
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/veegn/nodemates-scanner.git
+   cd nodemates-scanner
+   ```
 
-# Crawl domains from a URL and scan:
-./RealiTLScanner -url https://launchpad.net/ubuntu/+archivemirrors
+2. **Download GeoIP Database** (Optional but recommended for Geo lookup):
+   Place a MaxMind GeoLite2/GeoIP2 Country Database in the project root named `Country.mmdb`.
+   [Download here](https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb)
 
-# Specify a port to scan, default: 443
-./RealiTLScanner -addr 1.1.1.1 -port 443
+3. **Run the Server**:
+   ```bash
+   cargo run --release
+   ```
+   
+4. **Access the UI**:
+   Open `http://localhost:3000` in your web browser.
 
-# Show verbose output, including failed scans and infeasible targets:
-./RealiTLScanner -addr 1.2.3.0/24 -v
+### Docker Support
 
-# Save results to a file, default: out.csv
-./RealiTLScanner -addr www.microsoft.com -out file.csv
-
-# Set a thread count, default: 1
-./RealiTLScanner -addr wiki.ubuntu.com -thread 10
-
-# Set a timeout for each scan, default: 10 (seconds)
-./RealiTLScanner -addr 107.172.1.1/16 -timeout 5
-```
-### In docker way
-Build container by yourself (you do not needed in golonag on your host)
-```bash
-docker build -t realitlscanner .
-```
-Run and research
-```bash
-# show help
-docker run --rm realitlscanner
-# scan
-docker run --rm realitlscanner -addr 1.1.1.1
-```
-### Enable Geo IP
-
-To enable Geo IP information, place a MaxMind GeoLite2/GeoIP2 Country Database in the executing folder with the exact name `Country.mmdb`. You can download one from [here](https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb).
-
-## Demo
-
-Example stdout:
+You can easily deploy `nodemates-scanner` using Docker:
 
 ```bash
-2024/02/08 20:51:10 INFO Started all scanning threads time=2024-02-08T20:51:10.017+08:00
-2024/02/08 20:51:10 INFO Connected to target feasible=true host=107.172.103.9 tls=1.3 alpn=h2 domain=rocky-linux.tk issuer="Let's Encrypt"
-2024/02/08 20:51:10 INFO Connected to target feasible=true host=107.172.103.11 tls=1.3 alpn=h2 domain=rn.allinai.dev issuer="Let's Encrypt"
-2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.16 tls=1.3 alpn=h2 domain=san.hiddify01.foshou.vip issuer="Let's Encrypt"
-2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.19 tls=1.3 alpn=h2 domain=mgzx19.cnscholar.top issuer="Let's Encrypt"
-2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.22 tls=1.3 alpn=h2 domain=hy2.znull.top issuer=ZeroSSL
-2024/02/08 20:51:21 INFO Connected to target feasible=true host=107.172.103.37 tls=1.3 alpn=h2 domain=c1.webgenbd.com issuer="Let's Encrypt"
-2024/02/08 20:51:23 INFO Connected to target feasible=true host=107.172.103.46 tls=1.3 alpn=h2 domain=racknerd.myideal.xyz issuer="Let's Encrypt"
-2024/02/08 20:51:38 INFO Scanning completed time=2024-02-08T20:51:38.988+08:00 elapsed=28.97043s
+# Build the image
+docker build -t nodemates-scanner .
+
+# Run the container
+docker run -d -p 3000:3000 --name nodemates nodemates-scanner
 ```
 
-Example output file:
+## Usage & Interface
 
-```csv
-IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
-202.70.64.2,ntc.net.np,*.ntc.net.np,"GlobalSign nv-sa",NP
-196.200.160.70,mirror.marwan.ma,mirror.marwan.ma,"Let's Encrypt",MA
-103.194.167.213,mirror.i3d.net,*.i3d.net,"Sectigo Limited",JP
-194.127.172.131,nl.mirrors.clouvider.net,nl.mirrors.clouvider.net,"Let's Encrypt",NL
-202.36.220.86,mirror.2degrees.nz,mirror.2degrees.nz,"Let's Encrypt",NZ
-202.36.220.86,ubuntu.mirrors.theom.nz,mirror.2degrees.nz,"Let's Encrypt",NZ
-158.37.28.65,ubuntu.hi.no,alma.hi.no,"Let's Encrypt",NO
-193.136.164.6,ftp.rnl.tecnico.ulisboa.pt,ftp.rnl.ist.utl.pt,"Let's Encrypt",PT
-75.2.60.5,cesium.di.uminho.pt,cesium.di.uminho.pt,"Let's Encrypt",US
-195.14.50.21,mirror.corbina.net,ftp.corbina.net,"Let's Encrypt",RU
-```
+- **Target Input**: Accepts single IPs, Domains (e.g. `example.com`), or entire CIDR blocks (e.g. `107.172.103.0/24`). Private/Internal IPs are automatically skipped.
+- **Port Selection**: Simply toggle the pill-shaped checkboxes to scan multiple ports concurrently.
+- **Real-Time Pipeline**: As nodes are probed, results stream immediately into the UI via WebSockets. "Feasible" nodes (TLS 1.3 + ALPN h2 with valid domains) are highlighted and pushed to the top.
+- **Database History**: Switch to the **Database (节点图库)** tab to view, filter (by Geo/Domain), or delete previously discovered feasible nodes from the SQLite database.
 
+## Architecture
+
+- **Backend**: Rust, Axum, Tokio, tokio-rustls, sqlx (SQLite).
+- **Frontend**: Vanilla JavaScript (ES6+), CSS3 (Flexbox/Grid, Backdrop-filter), HTML5, WebSocket API.
+- **Database**: 
+  - `scan_results`: Stores healthy, feasible nodes along with their ALPN, Issuer, and Geo data.
+  - `scan_history`: Tracks scan progress, total tasks, and completion timestamps to enable exact breakpoint resumption and 30-day anti-abuse caching.
+
+## Disclaimer
+
+This tool is designed for educational purposes and internal network auditing. Please do not scan networks you do not own or have explicit permission to test.

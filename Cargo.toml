@@ -1,0 +1,21 @@
+[package]
+name = "nodemates-scanner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+axum = { version = "0.7", features = ["ws"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rustls = { version = "0.22", default-features = false, features = ["ring"] }
+tokio-rustls = "0.25"
+rustls-pki-types = "1.4"
+x509-parser = "0.16"
+maxminddb = "0.24"
+ipnet = "2.9"
+futures = "0.3"
+tower-http = { version = "0.5", features = ["fs"] }
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio"] }
+tokio-cron-scheduler = "0.10"
+reqwest = { version = "0.13.4", features = ["stream"] }

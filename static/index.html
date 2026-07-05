@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="pageTitle">nodemates-scanner - Advanced TLS Node Probing</title>
+    <meta name="description" content="nodemates-scanner is a powerful, asynchronous utility for probing and verifying TLS configurations across IPs, CIDRs, and Domains with real-time GeoIP capabilities.">
+    <meta name="keywords" content="TLS scanner, Reality scanner, Nodemates, GeoIP, Network security, ALPN, WebSockets, Node probing">
+    <meta name="author" content="Nodemates">
+    <meta property="og:title" content="nodemates-scanner - Node Probing Utility">
+    <meta property="og:description" content="Asynchronous TLS configuration scanner with real-time web UI, GeoIP mapping, and automatic database indexing.">
+    <meta property="og:type" content="website">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    
+    <nav class="site-nav">
+        <div class="nav-content">
+            <div class="nav-logo" data-i18n="title">nodemates-scanner</div>
+            <div class="nav-links" style="align-items: center;">
+                <button id="lang-toggle" class="lang-btn">中 / EN</button>
+                <a href="#" target="_blank" rel="noopener" data-i18n="navDocs">Documentation</a>
+                <a href="https://github.com/veegn/nodemates-scanner" target="_blank" rel="noopener">GitHub</a>
+            </div>
+        </div>
+    </nav>
+    
+    <main class="glass-container">
+        <header>
+            <h1 data-i18n="title">nodemates-scanner</h1>
+            <p data-i18n="subtitle">High-performance asynchronous TLS probing, Reality node verification, and GeoIP discovery platform.</p>
+            
+            <div class="features-list">
+                <div class="feature-badge" data-i18n="feat1">⚡ Asynchronous TLS Probing</div>
+                <div class="feature-badge" data-i18n="feat2">🛡️ Anti-abuse Protection</div>
+                <div class="feature-badge" data-i18n="feat3">🌍 Real-time GeoIP</div>
+                <div class="feature-badge" data-i18n="feat4">⏱️ Hourly Health Checks</div>
+            </div>
+            
+            <div class="tabs">
+                <button id="tab-scan" class="tab-btn active" data-i18n="tabScanner">Scanner</button>
+                <button id="tab-history" class="tab-btn" data-i18n="tabHistory">Database</button>
+                <button id="tab-settings" class="tab-btn" data-i18n="tabSettings">Settings</button>
+            </div>
+        </header>
+
+        <div id="scan-section">
+            <form id="scan-form">
+                <div class="input-group">
+                    <label for="target" data-i18n="targetLabel">Target (IP, CIDR, or Domain)</label>
+                    <input type="text" id="target" name="target" data-i18n="targetPlaceholder" placeholder="e.g. 1.1.1.1, 107.172.103.0/24, or example.com" required>
+                </div>
+                
+                <div class="input-row">
+                    <div class="input-group" style="flex: 2;">
+                        <label data-i18n="portsLabel">Common SSL Ports</label>
+                        <div class="ports-grid">
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="443" checked><span>443</span></label>
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="8443"><span>8443</span></label>
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2053"><span>2053</span></label>
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2083"><span>2083</span></label>
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2087"><span>2087</span></label>
+                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2096"><span>2096</span></label>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label for="timeout" data-i18n="timeoutLabel">Timeout (s)</label>
+                        <input type="number" id="timeout" name="timeout" value="10" min="1" max="60" required>
+                    </div>
+                </div>
+
+                <button type="submit" id="submit-btn">
+                    <span class="btn-text" data-i18n="btnStart">Initiate Scan</span>
+                    <div class="spinner"></div>
+                </button>
+            </form>
+
+            <section id="results-container">
+                <div class="stats">
+                    <div class="stat-box">
+                        <span class="stat-label" data-i18n="statScanned">Scanned</span>
+                        <span class="stat-value" id="stat-scanned">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label" data-i18n="statFeasible">Feasible</span>
+                        <span class="stat-value feasible-value" id="stat-feasible">0</span>
+                    </div>
+                </div>
+                
+                <div class="table-wrapper">
+                    <table id="results-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="thStatus">Status</th>
+                                <th data-i18n="thIP">IP</th>
+                                <th data-i18n="thPort">Port</th>
+                                <th data-i18n="thDomain">Domain</th>
+                                <th data-i18n="thALPN">ALPN</th>
+                                <th data-i18n="thIssuer">Issuer</th>
+                                <th data-i18n="thGeo">Geo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <section id="history-section" style="display: none;">
+            <div class="input-row" style="margin-bottom: 1.5rem;">
+                <div class="input-group">
+                    <label data-i18n="histGeoLabel">Filter by Geo (e.g. US)</label>
+                    <input type="text" id="hist-geo" data-i18n="histGeoPlaceholder" placeholder="US">
+                </div>
+                <div class="input-group">
+                    <label data-i18n="histDomainLabel">Filter by Domain</label>
+                    <input type="text" id="hist-domain" data-i18n="histDomainPlaceholder" placeholder="example.com">
+                </div>
+                <button id="fetch-history-btn" style="align-self: flex-end;" data-i18n="btnFetch">Fetch</button>
+            </div>
+            
+            <div class="table-wrapper">
+                <table id="history-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="thIP">IP</th>
+                            <th data-i18n="thPort">Port</th>
+                            <th data-i18n="thDomain">Domain</th>
+                            <th data-i18n="thIssuer">Issuer</th>
+                            <th data-i18n="thGeo">Geo</th>
+                            <th data-i18n="thScannedAt">Scanned At</th>
+                            <th data-i18n="thAction">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="settings-section" style="display: none;">
+            <form id="settings-form">
+                <div class="input-row">
+                    <div class="input-group">
+                        <label for="set-concurrency" data-i18n="setConcurrency">Concurrency Limit</label>
+                        <input type="number" id="set-concurrency" name="concurrency_limit" min="1" max="1000" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="set-cooldown" data-i18n="setCooldown">Cooldown (Days)</label>
+                        <input type="number" id="set-cooldown" name="cooldown_days" min="0" max="365" required>
+                    </div>
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label for="set-ipv4" data-i18n="setIpv4">IPv4 Max CIDR (e.g. 24 for /24)</label>
+                        <input type="number" id="set-ipv4" name="max_cidr_ipv4" min="8" max="32" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="set-ipv6" data-i18n="setIpv6">IPv6 Max CIDR (e.g. 120 for /120)</label>
+                        <input type="number" id="set-ipv6" name="max_cidr_ipv6" min="64" max="128" required>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="set-ports" data-i18n="setPorts">Allowed Ports (Comma-separated)</label>
+                    <input type="text" id="set-ports" name="allowed_ports" required>
+                </div>
+                <button type="submit" id="save-settings-btn" style="margin-top: 1rem;"><span class="btn-text" data-i18n="btnSaveSettings">Save Settings</span></button>
+            </form>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <p>&copy; 2026 VEEGN &bull; MADE WITH <span style="color: #ff3b30;">&hearts;</span> FOR RUST</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
