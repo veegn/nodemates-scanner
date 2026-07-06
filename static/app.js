@@ -485,6 +485,28 @@ function formatElapsed(ms) {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function formatLocalTime(utcString) {
+    if (!utcString) return '-';
+    let isoString = utcString;
+    if (utcString.includes(' ') && !utcString.includes('T')) {
+        isoString = utcString.replace(' ', 'T') + 'Z';
+    } else if (!utcString.endsWith('Z') && !utcString.includes('+') && !utcString.includes('-')) {
+        isoString = utcString + 'Z';
+    }
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) {
+        return utcString;
+    }
+    const pad = (num) => String(num).padStart(2, '0');
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    const seconds = pad(date.getSeconds());
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 function formatTemplate(template, values) {
     return template.replace(/\{(\w+)\}/g, (_, key) => values[key] ?? '');
 }
@@ -599,7 +621,11 @@ async function fetchHistoryTasks() {
             
             const targetInfo = document.createElement('div');
             targetInfo.className = 'accordion-target';
-            targetInfo.innerHTML = `<strong>${task.target}</strong><span class="accordion-meta">Completed: ${task.completed_tasks} / ${task.total_tasks} | Status: ${task.status} | Scanned At: ${task.scanned_at}</span>`;
+            const localScannedAt = formatLocalTime(task.scanned_at);
+            const scannedAtText = currentLang === 'zh' ? '扫描时间' : 'Scanned At';
+            const statusText = currentLang === 'zh' ? '状态' : 'Status';
+            const completedText = currentLang === 'zh' ? '完成进度' : 'Completed';
+            targetInfo.innerHTML = `<strong>${task.target}</strong><span class="accordion-meta">${completedText}: ${task.completed_tasks} / ${task.total_tasks} | ${statusText}: ${task.status} | ${scannedAtText}: ${localScannedAt}</span>`;
             
             const taskActionGroup = document.createElement('div');
             const taskDeleteBtn = document.createElement('button');
@@ -709,7 +735,8 @@ function renderTaskResults(container, data) {
         appendTextCell(tr, row.cert_validity);
         appendTextCell(tr, row.alpn);
         appendIssuerCell(tr, row.cert_issuer);
-        const scannedAtCell = appendTextCell(tr, row.scanned_at);
+        const localScannedAt = formatLocalTime(row.scanned_at);
+        const scannedAtCell = appendTextCell(tr, localScannedAt);
         scannedAtCell.style.fontSize = '0.85em';
         scannedAtCell.style.color = 'var(--text-secondary)';
 
