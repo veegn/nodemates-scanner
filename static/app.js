@@ -75,7 +75,7 @@ const translations = {
         alertNoPort: "Please select at least one port.",
         alertDeleteConfirm: "Delete result for {ip}?",
         badgeFeasible: "Feasible",
-        badgeFailed: "Failed"
+        badgeFailed: "Invalid"
     },
     zh: {
         pageTitle: "nodemates-scanner - 高级 TLS 节点嗅探",
@@ -152,8 +152,8 @@ const translations = {
         setPorts: "允许扫描的端口 (逗号分隔)",
         alertNoPort: "请至少选择一个扫描端口。",
         alertDeleteConfirm: "确定要删除 {ip} 的记录吗？",
-        badgeFeasible: "存活",
-        badgeFailed: "离线"
+        badgeFeasible: "可用",
+        badgeFailed: "无效"
     }
 };
 
@@ -728,6 +728,10 @@ function addResultRow(result) {
         total: totalTasks,
         current: formatTemplate(t.taskCurrent, { ip: result.ip, port: result.port }),
     });
+
+    if (!result.feasible && !result.cert_domain) {
+        return;
+    }
 
     const tr = document.createElement('tr');
     tr.style.opacity = '0';
