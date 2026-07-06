@@ -285,8 +285,17 @@ function appendTextCell(row, value) {
     return td;
 }
 
+function extractIssuerName(dn) {
+    if (!dn) return '-';
+    const oMatch = dn.match(/O=([^,]+)/i);
+    if (oMatch) return oMatch[1].trim();
+    const cnMatch = dn.match(/CN=([^,]+)/i);
+    return cnMatch ? cnMatch[1].trim() : dn;
+}
+
 function appendIssuerCell(row, value) {
-    const td = appendTextCell(row, value);
+    const cleanIssuer = extractIssuerName(value);
+    const td = appendTextCell(row, cleanIssuer);
     td.style.maxWidth = '200px';
     td.style.whiteSpace = 'nowrap';
     td.style.overflow = 'hidden';
