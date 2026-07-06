@@ -1,4 +1,4 @@
-Country.mmdb
+*.mmdb
 RealiTLScanner
 RealiTLScanner.exe
 .idea
@@ -12,3 +12,4 @@ RealiTLScanner.exe
 
 /target
 results.db
+results.db-*

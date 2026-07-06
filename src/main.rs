@@ -1,20 +1,16 @@
 mod handlers;
 mod models;
+mod scan_events;
 mod scanner;
+mod settings;
+mod targets;
 
 use axum::{Router, routing::get};
-use futures::stream::StreamExt;
-use rustls::ClientConfig;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::str::FromStr;
-use std::sync::Arc;
-use tokio_rustls::TlsConnector;
 use tower_http::services::ServeDir;
 
 use models::AppState;
-use scanner::{DummyVerifier, scan_tls};
 
 #[tokio::main]
 async fn main() {
@@ -42,8 +38,12 @@ async fn main() {
             geo_code TEXT,
             feasible BOOLEAN,
             cert_type TEXT DEFAULT '-',
+            asn_org TEXT DEFAULT '',
+            latency INTEGER DEFAULT 0,
+            cert_validity TEXT DEFAULT '',
             scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_port ON scan_results(ip, port);
         CREATE INDEX IF NOT EXISTS idx_ip ON scan_results(ip);
         CREATE INDEX IF NOT EXISTS idx_domain ON scan_results(cert_domain);
         CREATE INDEX IF NOT EXISTS idx_geo ON scan_results(geo_code);
@@ -58,6 +58,12 @@ async fn main() {
             scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_target ON scan_history(target);
+
+        CREATE TABLE IF NOT EXISTS scan_task_results (
+            history_id INTEGER NOT NULL,
+            result_id INTEGER NOT NULL,
+            PRIMARY KEY (history_id, result_id)
+        );
         
         CREATE TABLE IF NOT EXISTS system_settings (
             key TEXT PRIMARY KEY,
@@ -116,23 +122,6 @@ async fn main() {
 
     let state = AppState { db: db.clone() };
 
-    let sched = tokio_cron_scheduler::JobScheduler::new().await.unwrap();
-    let db_clone = db.clone();
-    sched
-        .add(
-            tokio_cron_scheduler::Job::new_async("0 0 * * * *", move |_uuid, _l| {
-                let db = db_clone.clone();
-                Box::pin(async move {
-                    println!("Running health check on feasible nodes...");
-                    run_health_check(db).await;
-                })
-            })
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    sched.start().await.unwrap();
-
     let app = Router::new()
         .nest_service("/", ServeDir::new("static"))
         .route("/scan", get(handlers::ws_scan_handler))
@@ -145,6 +134,11 @@ async fn main() {
             "/settings",
             get(handlers::get_settings_handler).put(handlers::put_settings_handler),
         )
+        .route("/history/tasks", get(handlers::get_history_tasks_handler))
+        .route(
+            "/history/tasks/:id",
+            axum::routing::delete(handlers::delete_history_task_handler),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
@@ -153,49 +147,16 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn run_health_check(db: sqlx::sqlite::SqlitePool) {
-    let rows: Vec<(String, i64, String)> =
-        sqlx::query_as("SELECT DISTINCT ip, port, origin FROM scan_results WHERE feasible = true")
-            .fetch_all(&db)
-            .await
-            .unwrap_or_default();
-
-    let mut config = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(DummyVerifier))
-        .with_no_client_auth();
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    let tls_connector = TlsConnector::from(Arc::new(config));
-
-    let iter = rows.into_iter().map(|(ip_str, port, origin)| {
-        let db = db.clone();
-        let tls = tls_connector.clone();
-        async move {
-            if let Ok(ip) = IpAddr::from_str(&ip_str) {
-                let res = scan_tls(ip, origin, port as u16, 5, tls, None, None).await;
-                if !res.feasible {
-                    if let Err(e) = sqlx::query("UPDATE scan_results SET feasible = false WHERE ip = ? AND port = ?")
-                        .bind(&ip_str).bind(port).execute(&db).await {
-                        eprintln!("Health check DB error (feasible=false): {}", e);
-                    }
-                } else {
-                    if let Err(e) = sqlx::query("UPDATE scan_results SET scanned_at = CURRENT_TIMESTAMP WHERE ip = ? AND port = ?")
-                        .bind(&ip_str).bind(port).execute(&db).await {
-                        eprintln!("Health check DB error (scanned_at update): {}", e);
-                    }
-                }
-            }
-        }
-    });
-
-    let mut stream = futures::stream::iter(iter).buffer_unordered(20);
-    while stream.next().await.is_some() {}
-}
-
 async fn ensure_geo_db() {
     let dbs = vec![
-        ("Country.mmdb", "https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb"),
-        ("GeoLite2-ASN.mmdb", "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb"),
+        (
+            "Country.mmdb",
+            "https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb",
+        ),
+        (
+            "GeoLite2-ASN.mmdb",
+            "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb",
+        ),
     ];
 
     for (db_path, url) in dbs {
@@ -214,7 +175,11 @@ async fn ensure_geo_db() {
                             println!("Failed to read Database {} response body.", db_path);
                         }
                     } else {
-                        println!("Failed to download Database {}, status code: {}", db_path, response.status());
+                        println!(
+                            "Failed to download Database {}, status code: {}",
+                            db_path,
+                            response.status()
+                        );
                     }
                 }
                 Err(e) => {

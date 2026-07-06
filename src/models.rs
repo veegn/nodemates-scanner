@@ -34,10 +34,21 @@ pub struct ScanResult {
 
 #[derive(Deserialize)]
 pub struct ResultsQuery {
+    pub history_id: Option<i64>,
     pub geo_code: Option<String>,
     pub domain: Option<String>,
     pub port: Option<u16>,
     pub limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct DbScanHistory {
+    pub id: i64,
+    pub target: String,
+    pub total_tasks: i32,
+    pub completed_tasks: i32,
+    pub status: String,
+    pub scanned_at: String,
 }
 
 #[derive(Deserialize)]

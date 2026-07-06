@@ -26,7 +26,6 @@
             <div class="nav-links" style="align-items: center;">
                 <button id="lang-toggle" class="lang-btn">中 / EN</button>
                 <button id="nav-settings" class="lang-btn" data-i18n="tabSettings">Settings</button>
-                <a href="#" target="_blank" rel="noopener" data-i18n="navDocs">Documentation</a>
                 <a href="https://github.com/veegn/nodemates-scanner" target="_blank" rel="noopener">GitHub</a>
             </div>
         </div>
@@ -41,48 +40,76 @@
                 <div class="feature-badge" data-i18n="feat1">⚡ Asynchronous TLS Probing</div>
                 <div class="feature-badge" data-i18n="feat2">🛡️ Anti-abuse Protection</div>
                 <div class="feature-badge" data-i18n="feat3">🌍 Real-time GeoIP</div>
-                <div class="feature-badge" data-i18n="feat4">⏱️ Hourly Health Checks</div>
             </div>
             
             <div class="tabs">
                 <button id="tab-scan" class="tab-btn active" data-i18n="tabScanner">Scanner</button>
-                <button id="tab-history" class="tab-btn" data-i18n="tabHistory">Database</button>
+                <button id="tab-history" class="tab-btn" data-i18n="tabHistory">Scan History</button>
             </div>
         </header>
 
         <div id="scan-section">
             <form id="scan-form">
-                <div class="input-group">
-                    <label for="target" data-i18n="targetLabel">Target (IP expands to subnet, CIDR, or Domain)</label>
-                    <input type="text" id="target" name="target" data-i18n="targetPlaceholder" placeholder="e.g. 1.1.1.1 scans its /24, or use 107.172.103.0/24, example.com" required>
-                </div>
-                
-                <div class="input-row">
-                    <div class="input-group" style="flex: 2;">
+                <div class="input-row" style="align-items: flex-end;">
+                    <div class="input-group" style="flex: 3;">
+                        <label for="target" data-i18n="targetLabel">Target (IP expands to subnet, CIDR, or Domain)</label>
+                        <input type="text" id="target" name="target" data-i18n="targetPlaceholder" placeholder="e.g. 1.1.1.1 scans its /24, or use 107.172.103.0/24, example.com" autocomplete="off" required>
+                    </div>
+                    
+                    <div class="input-group" style="flex: 2; position: relative;" id="port-selector-group">
                         <label data-i18n="portsLabel">Common SSL Ports</label>
-                        <div class="ports-grid">
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="443" checked><span>443</span></label>
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="8443"><span>8443</span></label>
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2053"><span>2053</span></label>
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2083"><span>2083</span></label>
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2087"><span>2087</span></label>
-                            <label class="port-checkbox"><input type="checkbox" name="ports" value="2096"><span>2096</span></label>
+                        <div class="apple-select-trigger" id="port-select-btn">
+                            <span id="port-select-text">443</span>
+                            <svg viewBox="0 0 24 24" class="chevron"><path d="M6 9l6 6 6-6" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </div>
+                        <div class="apple-select-dropdown" id="port-select-dropdown">
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="443" checked>
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">443</span>
+                            </label>
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="8443">
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">8443</span>
+                            </label>
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="2053">
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">2053</span>
+                            </label>
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="2083">
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">2083</span>
+                            </label>
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="2087">
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">2087</span>
+                            </label>
+                            <label class="apple-select-item">
+                                <input type="checkbox" name="ports" value="2096">
+                                <span class="checkmark"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span class="item-text">2096</span>
+                            </label>
                         </div>
                     </div>
-                    <div class="input-group">
+                    
+                    <div class="input-group" style="flex: 1;">
                         <label for="timeout" data-i18n="timeoutLabel">Timeout (s)</label>
                         <input type="number" id="timeout" name="timeout" value="10" min="1" max="60" required>
                     </div>
+                    
+                    <button type="submit" id="submit-btn" style="margin-top: 1.25rem; flex: 1; min-width: 140px;">
+                        <span class="btn-text" data-i18n="btnStart">Initiate Scan</span>
+                        <div class="spinner"></div>
+                    </button>
                 </div>
-
-                <button type="submit" id="submit-btn">
-                    <span class="btn-text" data-i18n="btnStart">Initiate Scan</span>
-                    <div class="spinner"></div>
-                </button>
             </form>
 
             <section id="results-container">
-                <div class="task-panel" id="task-panel" aria-live="polite">
+                <div class="task-panel unified-dashboard" id="task-panel" aria-live="polite">
                     <div class="task-panel-header">
                         <div>
                             <span class="task-eyebrow" data-i18n="taskEyebrow">Current Task</span>
@@ -90,39 +117,47 @@
                         </div>
                         <div class="task-percent" id="task-percent">0%</div>
                     </div>
-                    <div class="progress-track" aria-hidden="true">
+                    
+                    <div class="progress-track" aria-hidden="true" style="margin-bottom: 1rem;">
                         <div class="progress-fill" id="progress-fill"></div>
                     </div>
-                    <div class="task-meta">
-                        <div class="task-meta-item">
-                            <span data-i18n="taskTarget">Target</span>
-                            <strong id="task-target">-</strong>
+                    
+                    <!-- Hero Stats -->
+                    <div class="hero-stats">
+                        <div class="hero-stat-item feasible-hero">
+                            <span class="hero-val" id="stat-feasible">0</span>
+                            <span class="hero-label" data-i18n="statFeasible">Feasible</span>
                         </div>
-                        <div class="task-meta-item">
-                            <span data-i18n="taskPorts">Ports</span>
-                            <strong id="task-ports">-</strong>
-                        </div>
-                        <div class="task-meta-item">
-                            <span data-i18n="taskElapsed">Elapsed</span>
-                            <strong id="task-elapsed">00:00</strong>
-                        </div>
-                        <div class="task-meta-item">
-                            <span data-i18n="taskRate">Rate</span>
-                            <strong id="task-rate">0/min</strong>
+                        <div class="hero-divider"></div>
+                        <div class="hero-stat-item">
+                            <span class="hero-val" id="stat-scanned">0</span>
+                            <span class="hero-label" data-i18n="statScanned">Scanned</span>
                         </div>
                     </div>
-                    <div class="task-current" id="task-current" data-i18n="taskWaiting">Waiting for a scan request.</div>
-                </div>
 
-                <div class="stats">
-                    <div class="stat-box">
-                        <span class="stat-label" data-i18n="statScanned">Scanned</span>
-                        <span class="stat-value" id="stat-scanned">0</span>
+                    <!-- Secondary Meta -->
+                    <div class="secondary-meta">
+                        <div class="meta-row">
+                            <div class="meta-item-small">
+                                <span class="meta-lbl" data-i18n="taskTarget">Target:</span>
+                                <span class="meta-val text-truncate" title="Target" id="task-target">-</span>
+                            </div>
+                            <div class="meta-item-small">
+                                <span class="meta-lbl" data-i18n="taskPorts">Ports:</span>
+                                <span class="meta-val text-truncate" title="Ports" id="task-ports">-</span>
+                            </div>
+                            <div class="meta-item-small">
+                                <span class="meta-lbl" data-i18n="taskRate">Rate:</span>
+                                <span class="meta-val" id="task-rate">0/min</span>
+                            </div>
+                            <div class="meta-item-small">
+                                <span class="meta-lbl" data-i18n="taskElapsed">Elapsed:</span>
+                                <span class="meta-val" id="task-elapsed">00:00</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="stat-box">
-                        <span class="stat-label" data-i18n="statFeasible">Feasible</span>
-                        <span class="stat-value feasible-value" id="stat-feasible">0</span>
-                    </div>
+                    
+                    <div class="task-current" id="task-current" data-i18n="taskWaiting">Waiting for a scan request.</div>
                 </div>
                 
                 <div class="table-wrapper">
@@ -149,99 +184,54 @@
         <section id="history-section" style="display: none;">
             <div class="library-header">
                 <div>
-                    <span class="task-eyebrow" data-i18n="libraryEyebrow">Node Library</span>
-                    <h2 data-i18n="libraryTitle">Discovered Nodes</h2>
+                    <span class="task-eyebrow" data-i18n="historyEyebrow">Scan History</span>
+                    <h2 data-i18n="historyTitle">Past Scans</h2>
                 </div>
-                <button id="clear-history-filters-btn" class="secondary-btn" data-i18n="btnClearFilters">Clear filters</button>
-            </div>
-
-            <div class="library-summary">
-                <div class="summary-tile">
-                    <span data-i18n="libraryReturned">Returned</span>
-                    <strong id="history-total">0</strong>
-                </div>
-                <div class="summary-tile">
-                    <span data-i18n="libraryGeos">Geos</span>
-                    <strong id="history-geo-count">0</strong>
-                </div>
-                <div class="summary-tile">
-                    <span data-i18n="libraryDomains">Domains</span>
-                    <strong id="history-domain-count">0</strong>
-                </div>
-            </div>
-
-            <div class="library-filters">
-                <div class="input-group">
-                    <label data-i18n="histGeoLabel">Geo</label>
-                    <input type="text" id="hist-geo" data-i18n="histGeoPlaceholder" placeholder="US">
-                </div>
-                <div class="input-group">
-                    <label data-i18n="histDomainLabel">Domain</label>
-                    <input type="text" id="hist-domain" data-i18n="histDomainPlaceholder" placeholder="example.com">
-                </div>
-                <div class="input-group">
-                    <label data-i18n="histPortLabel">Port</label>
-                    <input type="number" id="hist-port" data-i18n="histPortPlaceholder" placeholder="443" min="1" max="65535">
-                </div>
-                <div class="input-group">
-                    <label data-i18n="histLimitLabel">Limit</label>
-                    <input type="number" id="hist-limit" value="100" min="1" max="1000">
-                </div>
-                <button id="fetch-history-btn" data-i18n="btnFetch">Fetch</button>
+                <button id="refresh-history-btn" class="secondary-btn" data-i18n="btnRefresh">Refresh</button>
             </div>
             
             <div id="history-empty" class="empty-state" style="display: none;">
-                <strong data-i18n="libraryEmptyTitle">No nodes found</strong>
-                <span data-i18n="libraryEmptyText">Adjust filters or run a new scan to populate the library.</span>
+                <strong data-i18n="historyEmptyTitle">No scan history found</strong>
+                <span data-i18n="historyEmptyText">Run a new scan to start building your history.</span>
             </div>
 
-            <div class="table-wrapper">
-                <table id="history-table">
-                    <thead>
-                        <tr>
-                            <th data-i18n="thIP">IP</th>
-                            <th data-i18n="thPort">Port</th>
-                            <th data-i18n="thLatency">Latency</th>
-                            <th data-i18n="thTLS">TLS</th>
-                            <th data-i18n="thDomain">Domain</th>
-                            <th data-i18n="thValidity">Validity</th>
-                            <th data-i18n="thALPN">ALPN</th>
-                            <th data-i18n="thIssuer">Issuer</th>
-                            <th data-i18n="thScannedAt">Scanned At</th>
-                            <th data-i18n="thAction">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="history-body">
-                    </tbody>
-                </table>
+            <div id="history-accordion-container">
+                <!-- Accordions will be injected here by app.js -->
             </div>
         </section>
 
         <section id="settings-section" style="display: none;">
+            <div class="settings-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid var(--glass-border); padding-bottom: 0.75rem;">
+                <h2 style="font-size: 1.35rem; font-weight: 700; margin: 0;" data-i18n="settingsTitle">System Settings</h2>
+                <button type="button" id="settings-back-btn" class="secondary-btn" style="display: flex; align-items: center; gap: 6px; padding: 0.4rem 0.8rem; font-size: 0.85rem;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                    <span data-i18n="btnBack">Back</span>
+                </button>
+            </div>
             <form id="settings-form">
                 <div class="input-row">
                     <div class="input-group">
                         <label for="set-concurrency" data-i18n="setConcurrency">Concurrency Limit</label>
-                        <input type="number" id="set-concurrency" name="concurrency_limit" min="1" max="1000" required>
+                        <input type="number" id="set-concurrency" name="concurrency_limit" min="1" max="1000" autocomplete="off" required>
                     </div>
                     <div class="input-group">
                         <label for="set-cooldown" data-i18n="setCooldown">Cooldown (Days)</label>
-                        <input type="number" id="set-cooldown" name="cooldown_days" min="0" max="365" required>
+                        <input type="number" id="set-cooldown" name="cooldown_days" min="0" max="365" autocomplete="off" required>
                     </div>
                 </div>
                 <div class="input-row">
                     <div class="input-group">
                         <label for="set-ipv4" data-i18n="setIpv4">IPv4 Max CIDR (e.g. 24 for /24)</label>
-                        <input type="number" id="set-ipv4" name="max_cidr_ipv4" min="8" max="32" required>
+                        <input type="number" id="set-ipv4" name="max_cidr_ipv4" min="8" max="32" autocomplete="off" required>
                     </div>
                     <div class="input-group">
                         <label for="set-ipv6" data-i18n="setIpv6">IPv6 Max CIDR (e.g. 120 for /120)</label>
-                        <input type="number" id="set-ipv6" name="max_cidr_ipv6" min="64" max="128" required>
+                        <input type="number" id="set-ipv6" name="max_cidr_ipv6" min="64" max="128" autocomplete="off" required>
                     </div>
                 </div>
                 <div class="input-group">
                     <label for="set-ports" data-i18n="setPorts">Allowed Ports (Comma-separated)</label>
-                    <input type="text" id="set-ports" name="allowed_ports" required>
+                    <input type="text" id="set-ports" name="allowed_ports" autocomplete="off" required>
                 </div>
                 <button type="submit" id="save-settings-btn" style="margin-top: 1rem;"><span class="btn-text" data-i18n="btnSaveSettings">Save Settings</span></button>
             </form>
@@ -251,6 +241,22 @@
     <footer class="site-footer">
         <p>&copy; 2026 VEEGN &bull; MADE WITH <span style="color: #ff3b30;">&hearts;</span> FOR RUST</p>
     </footer>
+
+    <!-- Custom Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Custom Confirmation Modal -->
+    <div id="modal-container" class="modal-container">
+        <div class="modal-backdrop" id="modal-backdrop"></div>
+        <div class="modal-content">
+            <h3 id="modal-title">Confirmation</h3>
+            <p id="modal-message">Are you sure you want to proceed?</p>
+            <div class="modal-actions">
+                <button id="modal-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="modal-confirm-btn" class="confirm-btn">Confirm</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

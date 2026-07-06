@@ -7,9 +7,8 @@ const translations = {
         feat1: "⚡ Asynchronous TLS Probing",
         feat2: "🛡️ Anti-abuse Protection",
         feat3: "🌍 Real-time GeoIP",
-        feat4: "⏱️ Hourly Health Checks",
         tabScanner: "Scanner",
-        tabHistory: "Database",
+        tabHistory: "Scan History",
         tabSettings: "Settings",
         targetLabel: "Target (IP expands to subnet, CIDR, or Domain)",
         targetPlaceholder: "e.g. 1.1.1.1 scans its /24, or use 107.172.103.0/24, example.com",
@@ -47,22 +46,11 @@ const translations = {
         thCertType: "Cert Type",
         thScannedAt: "Scanned At",
         thAction: "Action",
-        libraryEyebrow: "Node Library",
-        libraryTitle: "Discovered Nodes",
-        libraryReturned: "Returned",
-        libraryGeos: "Geos",
-        libraryDomains: "Domains",
-        libraryEmptyTitle: "No nodes found",
-        libraryEmptyText: "Adjust filters or run a new scan to populate the library.",
-        histGeoLabel: "Geo",
-        histGeoPlaceholder: "US",
-        histDomainLabel: "Domain",
-        histDomainPlaceholder: "example.com",
-        histPortLabel: "Port",
-        histPortPlaceholder: "443",
-        histLimitLabel: "Limit",
-        btnFetch: "Fetch",
-        btnClearFilters: "Clear filters",
+        historyEyebrow: "Scan History",
+        historyTitle: "Past Scans",
+        historyEmptyTitle: "No scan history found",
+        historyEmptyText: "Run a new scan to start building your history.",
+        btnRefresh: "Refresh",
         btnCopy: "Copy",
         btnCopied: "Copied",
         btnDelete: "Delete",
@@ -74,7 +62,9 @@ const translations = {
         alertNoPort: "Please select at least one port.",
         alertDeleteConfirm: "Delete result for {ip}?",
         badgeFeasible: "Feasible",
-        badgeFailed: "Invalid"
+        badgeFailed: "Invalid",
+        btnBack: "Back",
+        settingsTitle: "System Settings"
     },
     zh: {
         pageTitle: "nodemates-scanner - 高级 TLS 节点嗅探",
@@ -84,9 +74,8 @@ const translations = {
         feat1: "⚡ 纯异步 TLS 嗅探",
         feat2: "🛡️ 防滥用与拦截机制",
         feat3: "🌍 实时 GeoIP 映射",
-        feat4: "⏱️ 小时级存活检查",
         tabScanner: "雷达扫描",
-        tabHistory: "节点图库",
+        tabHistory: "扫描历史",
         tabSettings: "系统设置",
         targetLabel: "目标 (IP 自动扩展为所属网段、CIDR 或域名)",
         targetPlaceholder: "例如 1.1.1.1 会扫描其 /24，也可输入 107.172.103.0/24 或 example.com",
@@ -124,22 +113,11 @@ const translations = {
         thCertType: "证书类型",
         thScannedAt: "扫描时间",
         thAction: "操作",
-        libraryEyebrow: "节点图库",
-        libraryTitle: "已发现节点",
-        libraryReturned: "当前结果",
-        libraryGeos: "地区数",
-        libraryDomains: "域名数",
-        libraryEmptyTitle: "暂无节点",
-        libraryEmptyText: "调整筛选条件，或先运行一次扫描写入节点。",
-        histGeoLabel: "地区",
-        histGeoPlaceholder: "例: US",
-        histDomainLabel: "域名",
-        histDomainPlaceholder: "例: example.com",
-        histPortLabel: "端口",
-        histPortPlaceholder: "443",
-        histLimitLabel: "数量",
-        btnFetch: "拉取记录",
-        btnClearFilters: "清空筛选",
+        historyEyebrow: "任务列表",
+        historyTitle: "历史扫描记录",
+        historyEmptyTitle: "暂无扫描历史",
+        historyEmptyText: "去雷达扫描页运行一次扫描即可生成历史记录。",
+        btnRefresh: "刷新",
         btnCopy: "复制",
         btnCopied: "已复制",
         btnDelete: "删除",
@@ -151,7 +129,9 @@ const translations = {
         alertNoPort: "请至少选择一个扫描端口。",
         alertDeleteConfirm: "确定要删除 {ip} 的记录吗？",
         badgeFeasible: "可用",
-        badgeFailed: "无效"
+        badgeFailed: "无效",
+        btnBack: "返回",
+        settingsTitle: "系统设置"
     }
 };
 
@@ -212,14 +192,12 @@ const navSettings = document.getElementById('nav-settings');
 const scanSection = document.getElementById('scan-section');
 const historySection = document.getElementById('history-section');
 const settingsSection = document.getElementById('settings-section');
-const fetchHistoryBtn = document.getElementById('fetch-history-btn');
-const clearHistoryFiltersBtn = document.getElementById('clear-history-filters-btn');
-const historyBody = document.getElementById('history-body');
-const historyTotal = document.getElementById('history-total');
-const historyGeoCount = document.getElementById('history-geo-count');
-const historyDomainCount = document.getElementById('history-domain-count');
+const historyAccordionContainer = document.getElementById('history-accordion-container');
+const refreshHistoryBtn = document.getElementById('refresh-history-btn');
 const historyEmpty = document.getElementById('history-empty');
 const langToggle = document.getElementById('lang-toggle');
+const tabsContainer = document.querySelector('.glass-container > header > .tabs');
+const settingsBackBtn = document.getElementById('settings-back-btn');
 
 const taskState = {
     status: 'idle',
@@ -240,6 +218,94 @@ langToggle.addEventListener('click', (e) => {
 // Init lang
 applyLanguage(currentLang);
 
+// Custom Toast and Confirmation Dialog functions
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+
+    toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-message">${message}</span>
+    `;
+
+    container.appendChild(toast);
+
+    // Fade in
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+
+    // Fade out and remove
+    setTimeout(() => {
+        toast.classList.remove('show');
+        const handleTransitionEnd = () => {
+            toast.remove();
+            toast.removeEventListener('transitionend', handleTransitionEnd);
+        };
+        toast.addEventListener('transitionend', handleTransitionEnd);
+    }, 4000);
+}
+
+function showConfirm(title, message) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('modal-container');
+        const modalTitle = document.getElementById('modal-title');
+        const modalMessage = document.getElementById('modal-message');
+        const confirmBtn = document.getElementById('modal-confirm-btn');
+        const cancelBtn = document.getElementById('modal-cancel-btn');
+        const backdrop = document.getElementById('modal-backdrop');
+
+        if (!modal || !modalTitle || !modalMessage || !confirmBtn || !cancelBtn) {
+            resolve(false);
+            return;
+        }
+
+        modalTitle.textContent = title;
+        modalMessage.textContent = message;
+
+        // Localized button text
+        confirmBtn.textContent = currentLang === 'zh' ? '确定' : 'Confirm';
+        cancelBtn.textContent = currentLang === 'zh' ? '取消' : 'Cancel';
+
+        modal.style.display = 'flex';
+        // Trigger transition
+        requestAnimationFrame(() => {
+            modal.classList.add('show');
+        });
+
+        const cleanup = (value) => {
+            modal.classList.remove('show');
+            
+            const handleTransitionEnd = () => {
+                modal.style.display = 'none';
+                modal.removeEventListener('transitionend', handleTransitionEnd);
+            };
+            modal.addEventListener('transitionend', handleTransitionEnd);
+
+            // Remove event listeners
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            backdrop.removeEventListener('click', onCancel);
+
+            resolve(value);
+        };
+
+        const onConfirm = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        backdrop.addEventListener('click', onCancel);
+    });
+}
+
 // Tabs logic
 tabScan.addEventListener('click', () => {
     tabScan.classList.add('active');
@@ -247,6 +313,7 @@ tabScan.addEventListener('click', () => {
     scanSection.style.display = 'block';
     historySection.style.display = 'none';
     settingsSection.style.display = 'none';
+    if (tabsContainer) tabsContainer.style.display = 'inline-flex';
 });
 
 tabHistory.addEventListener('click', () => {
@@ -255,7 +322,8 @@ tabHistory.addEventListener('click', () => {
     scanSection.style.display = 'none';
     historySection.style.display = 'block';
     settingsSection.style.display = 'none';
-    fetchHistory();
+    if (tabsContainer) tabsContainer.style.display = 'inline-flex';
+    fetchHistoryTasks();
 });
 
 navSettings.addEventListener('click', (e) => {
@@ -265,8 +333,15 @@ navSettings.addEventListener('click', (e) => {
     scanSection.style.display = 'none';
     historySection.style.display = 'none';
     settingsSection.style.display = 'block';
+    if (tabsContainer) tabsContainer.style.display = 'none';
     fetchSettings();
 });
+
+if (settingsBackBtn) {
+    settingsBackBtn.addEventListener('click', () => {
+        tabScan.click();
+    });
+}
 
 function clearChildren(element) {
     while (element.firstChild) {
@@ -505,116 +580,197 @@ function renderTaskState() {
     taskCurrent.textContent = taskState.current || t.taskWaiting;
 }
 
-async function fetchHistory() {
-    const geo = document.getElementById('hist-geo').value.trim();
-    const domain = document.getElementById('hist-domain').value.trim();
-    const port = document.getElementById('hist-port').value.trim();
-    const limit = document.getElementById('hist-limit').value.trim();
-
-    const params = new URLSearchParams();
-    if (geo) params.set('geo_code', geo.toUpperCase());
-    if (domain) params.set('domain', domain);
-    if (port) params.set('port', port);
-    if (limit) params.set('limit', limit);
-
-    fetchHistoryBtn.classList.add('loading');
-
+async function fetchHistoryTasks() {
+    refreshHistoryBtn.classList.add('loading');
     try {
-        const res = await fetch(`/results?${params.toString()}`);
-        if (!res.ok) throw new Error('Failed to fetch history');
+        const res = await fetch('/history/tasks');
+        if (!res.ok) throw new Error('Failed to fetch history tasks');
         const data = await res.json();
 
-        renderHistorySummary(data);
-        clearChildren(historyBody);
+        clearChildren(historyAccordionContainer);
         historyEmpty.style.display = data.length === 0 ? 'block' : 'none';
 
-        for (const row of data) {
-            const tr = document.createElement('tr');
-            appendTextCell(tr, row.ip, row.asn_org ? `ASN: ${row.asn_org}` : null);
-            appendTextCell(tr, String(row.port));
-            appendLatencyCell(tr, row.latency);
-            appendTextCell(tr, row.tls_version);
-            appendDomainCell(tr, row.cert_domain, row.cert_issuer, row.asn_org);
-            appendTextCell(tr, row.cert_validity);
-            appendTextCell(tr, row.alpn);
-            appendIssuerCell(tr, row.cert_issuer);
-            const scannedAtCell = appendTextCell(tr, row.scanned_at);
-            scannedAtCell.style.fontSize = '0.85em';
-            scannedAtCell.style.color = 'var(--text-secondary)';
+        for (const task of data) {
+            const accordionItem = document.createElement('div');
+            accordionItem.className = 'accordion-item';
 
-            const actionCell = document.createElement('td');
-            const actionGroup = document.createElement('div');
-            actionGroup.className = 'action-group';
-
-            const copyBtn = document.createElement('button');
-            copyBtn.className = 'copy-btn';
-            copyBtn.dataset.endpoint = endpoint;
-            copyBtn.textContent = t.btnCopy;
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'delete-btn';
-            deleteBtn.dataset.ip = row.ip;
-            deleteBtn.dataset.port = row.port;
-            deleteBtn.textContent = t.btnDelete;
-
-            actionGroup.appendChild(copyBtn);
-            actionGroup.appendChild(deleteBtn);
-            actionCell.appendChild(actionGroup);
-            tr.appendChild(actionCell);
-            historyBody.appendChild(tr);
-        }
-
-        document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const endpoint = e.target.getAttribute('data-endpoint');
-                await copyText(endpoint);
-                e.target.textContent = t.btnCopied;
-                setTimeout(() => {
-                    e.target.textContent = t.btnCopy;
-                }, 1200);
-            });
-        });
-
-        document.querySelectorAll('.delete-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const ip = e.target.getAttribute('data-ip');
-                const port = e.target.getAttribute('data-port');
-                if (confirm(t.alertDeleteConfirm.replace('{ip}', ip))) {
+            const header = document.createElement('div');
+            header.className = 'accordion-header';
+            
+            const targetInfo = document.createElement('div');
+            targetInfo.className = 'accordion-target';
+            targetInfo.innerHTML = `<strong>${task.target}</strong><span class="accordion-meta">Completed: ${task.completed_tasks} / ${task.total_tasks} | Status: ${task.status} | Scanned At: ${task.scanned_at}</span>`;
+            
+            const taskActionGroup = document.createElement('div');
+            const taskDeleteBtn = document.createElement('button');
+            taskDeleteBtn.className = 'secondary-btn';
+            taskDeleteBtn.style.padding = '0.25rem 0.5rem';
+            taskDeleteBtn.style.fontSize = '0.8rem';
+            taskDeleteBtn.textContent = t.btnDelete || 'Delete';
+            
+            taskDeleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // prevent expanding accordion
+                const confirmTitle = currentLang === 'zh' ? '删除确认' : 'Delete Confirmation';
+                const confirmMessage = currentLang === 'zh' ? `确定要删除 ${task.target} 的扫描历史吗？` : `Delete scan history for ${task.target}?`;
+                const confirmed = await showConfirm(confirmTitle, confirmMessage);
+                if (confirmed) {
                     try {
-                        const delRes = await fetch(`/results/${encodeURIComponent(ip)}?port=${encodeURIComponent(port)}`, { method: 'DELETE' });
-                        if (!delRes.ok) throw new Error('Failed to delete');
-                        e.target.closest('tr').remove();
-                        fetchHistory();
+                        const delRes = await fetch(`/history/tasks/${task.id}`, { method: 'DELETE' });
+                        if (!delRes.ok) throw new Error('Failed to delete history task');
+                        accordionItem.remove();
+                        showToast(currentLang === 'zh' ? '删除成功' : 'Deleted successfully', 'success');
                     } catch (err) {
-                        alert(err.message);
+                        showToast(err.message, 'error');
                     }
                 }
             });
-        });
+            taskActionGroup.appendChild(taskDeleteBtn);
 
+            header.appendChild(targetInfo);
+            header.appendChild(taskActionGroup);
+
+            const content = document.createElement('div');
+            content.className = 'accordion-content';
+            content.style.display = 'none';
+
+            header.addEventListener('click', async () => {
+                const isActive = accordionItem.classList.contains('active');
+
+                document.querySelectorAll('.accordion-item').forEach(item => {
+                    item.classList.remove('active');
+                    item.querySelector('.accordion-content').style.display = 'none';
+                });
+
+                if (!isActive) {
+                    accordionItem.classList.add('active');
+                    content.style.display = 'block';
+
+                    if (content.innerHTML === '') {
+                        content.innerHTML = '<div class="spinner"></div>';
+                        try {
+                            const res = await fetch(`/results?history_id=${task.id}`);
+                            if (!res.ok) throw new Error('Failed to fetch results');
+                            const resultsData = await res.json();
+                            renderTaskResults(content, resultsData);
+                        } catch (err) {
+                            content.innerHTML = `<span style="color:var(--danger)">${err.message}</span>`;
+                        }
+                    }
+                }
+            });
+
+            accordionItem.appendChild(header);
+            accordionItem.appendChild(content);
+            historyAccordionContainer.appendChild(accordionItem);
+        }
     } catch (e) {
-        alert(e.message);
+        showToast(e.message, 'error');
     } finally {
-        fetchHistoryBtn.classList.remove('loading');
+        refreshHistoryBtn.classList.remove('loading');
     }
 }
 
-fetchHistoryBtn.addEventListener('click', fetchHistory);
+function renderTaskResults(container, data) {
+    clearChildren(container);
+    if (data.length === 0) {
+        container.innerHTML = '<div style="padding: 1rem; color: var(--text-secondary);">No feasible nodes found in this scan.</div>';
+        return;
+    }
 
-clearHistoryFiltersBtn.addEventListener('click', () => {
-    document.getElementById('hist-geo').value = '';
-    document.getElementById('hist-domain').value = '';
-    document.getElementById('hist-port').value = '';
-    document.getElementById('hist-limit').value = '100';
-    fetchHistory();
-});
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+    
+    const table = document.createElement('table');
+    table.innerHTML = `
+        <thead>
+            <tr>
+                <th data-i18n="thIP">${t.thIP}</th>
+                <th data-i18n="thPort">${t.thPort}</th>
+                <th data-i18n="thLatency">${t.thLatency}</th>
+                <th data-i18n="thTLS">${t.thTLS}</th>
+                <th data-i18n="thDomain">${t.thDomain}</th>
+                <th data-i18n="thValidity">${t.thValidity}</th>
+                <th data-i18n="thALPN">${t.thALPN}</th>
+                <th data-i18n="thIssuer">${t.thIssuer}</th>
+                <th data-i18n="thScannedAt">${t.thScannedAt}</th>
+                <th data-i18n="thAction">${t.thAction}</th>
+            </tr>
+        </thead>
+    `;
+    const tbody = document.createElement('tbody');
 
-function renderHistorySummary(rows) {
-    const geos = new Set(rows.map(row => row.geo_code).filter(Boolean));
-    const domains = new Set(rows.map(row => row.cert_domain).filter(Boolean));
-    historyTotal.textContent = rows.length;
-    historyGeoCount.textContent = geos.size;
-    historyDomainCount.textContent = domains.size;
+    for (const row of data) {
+        const tr = document.createElement('tr');
+        appendTextCell(tr, row.ip, row.asn_org ? `ASN: ${row.asn_org}` : null);
+        appendTextCell(tr, String(row.port));
+        appendLatencyCell(tr, row.latency);
+        appendTextCell(tr, row.tls_version);
+        appendDomainCell(tr, row.cert_domain, row.cert_issuer, row.asn_org);
+        appendTextCell(tr, row.cert_validity);
+        appendTextCell(tr, row.alpn);
+        appendIssuerCell(tr, row.cert_issuer);
+        const scannedAtCell = appendTextCell(tr, row.scanned_at);
+        scannedAtCell.style.fontSize = '0.85em';
+        scannedAtCell.style.color = 'var(--text-secondary)';
+
+        const actionCell = document.createElement('td');
+        const actionGroup = document.createElement('div');
+        actionGroup.className = 'action-group';
+
+        const endpoint = `${row.ip}:${row.port}`;
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.dataset.endpoint = endpoint;
+        copyBtn.textContent = t.btnCopy;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.dataset.ip = row.ip;
+        deleteBtn.dataset.port = row.port;
+        deleteBtn.textContent = t.btnDelete;
+
+        actionGroup.appendChild(copyBtn);
+        actionGroup.appendChild(deleteBtn);
+        actionCell.appendChild(actionGroup);
+        tr.appendChild(actionCell);
+        tbody.appendChild(tr);
+    }
+    
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    container.appendChild(wrapper);
+}
+
+refreshHistoryBtn.addEventListener('click', fetchHistoryTasks);
+historyAccordionContainer.addEventListener('click', handleHistoryResultAction);
+
+async function handleHistoryResultAction(e) {
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+        await copyText(copyBtn.dataset.endpoint);
+        copyBtn.textContent = t.btnCopied;
+        setTimeout(() => {
+            copyBtn.textContent = t.btnCopy;
+        }, 1200);
+        return;
+    }
+
+    const deleteBtn = e.target.closest('.delete-btn');
+    if (!deleteBtn) return;
+
+    const { ip, port } = deleteBtn.dataset;
+    const confirmTitle = currentLang === 'zh' ? '删除确认' : 'Delete Confirmation';
+    const confirmed = await showConfirm(confirmTitle, t.alertDeleteConfirm.replace('{ip}', ip));
+    if (!confirmed) return;
+
+    try {
+        const delRes = await fetch(`/results/${encodeURIComponent(ip)}?port=${encodeURIComponent(port)}`, { method: 'DELETE' });
+        if (!delRes.ok) throw new Error('Failed to delete');
+        deleteBtn.closest('tr').remove();
+        showToast(currentLang === 'zh' ? '删除成功' : 'Deleted successfully', 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
 }
 
 async function copyText(text) {
@@ -646,7 +802,7 @@ async function fetchSettings() {
         document.getElementById('set-cooldown').value = data.cooldown_days;
         document.getElementById('set-ports').value = data.allowed_ports;
     } catch (e) {
-        alert(e.message);
+        showToast(e.message, 'error');
     }
 }
 
@@ -670,9 +826,9 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
             body: JSON.stringify(settings)
         });
         if (!res.ok) throw new Error('Failed to save settings');
-        alert(currentLang === 'zh' ? '设置已保存' : 'Settings saved successfully');
+        showToast(currentLang === 'zh' ? '设置已保存' : 'Settings saved successfully', 'success');
     } catch (err) {
-        alert(err.message);
+        showToast(err.message, 'error');
     } finally {
         btn.classList.remove('loading');
     }
@@ -706,7 +862,7 @@ form.addEventListener('submit', async (e) => {
     const ports = Array.from(portCheckboxes).map(cb => parseInt(cb.value, 10));
 
     if (ports.length === 0) {
-        alert(t.alertNoPort);
+        showToast(t.alertNoPort, 'error');
         resetButton();
         return;
     }
@@ -730,7 +886,7 @@ form.addEventListener('submit', async (e) => {
             result = JSON.parse(event.data);
         } catch (e) {
             if (event.data.startsWith('Error:')) {
-                alert(event.data);
+                showToast(event.data, 'error');
                 taskState.status = 'failed';
                 taskState.current = event.data;
                 setTaskTimer(false);
@@ -865,4 +1021,42 @@ function addResultRow(result) {
         tr.style.opacity = '1';
         tr.style.transform = 'translateY(0)';
     });
+}
+
+// Apple Style Select Logic
+const portSelectBtn = document.getElementById('port-select-btn');
+const portSelectDropdown = document.getElementById('port-select-dropdown');
+const portSelectText = document.getElementById('port-select-text');
+const portCheckboxesApple = document.querySelectorAll('#port-select-dropdown input[name="ports"]');
+
+if (portSelectBtn && portSelectDropdown && portSelectText) {
+    portSelectBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        portSelectBtn.classList.toggle('open');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!portSelectDropdown.contains(e.target) && !portSelectBtn.contains(e.target)) {
+            portSelectBtn.classList.remove('open');
+        }
+    });
+
+    const updatePortText = () => {
+        const selected = Array.from(portCheckboxesApple)
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
+        if (selected.length === 0) {
+            portSelectText.textContent = currentLang === 'zh' ? '未选择' : 'None';
+        } else if (selected.length <= 3) {
+            portSelectText.textContent = selected.join(', ');
+        } else {
+            portSelectText.textContent = currentLang === 'zh' ? `${selected.length} 个端口` : `${selected.length} selected`;
+        }
+    };
+
+    portCheckboxesApple.forEach(cb => {
+        cb.addEventListener('change', updatePortText);
+    });
+
+    updatePortText();
 }

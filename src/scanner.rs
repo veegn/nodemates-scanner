@@ -192,7 +192,7 @@ pub async fn scan_tls(
         Ok(Ok(s)) => s,
         _ => return default_fail_result(ip, port, origin, geo_code),
     };
-    
+
     let latency = start_time.elapsed().as_millis() as u32;
 
     let (_, connection) = tls_stream.into_inner();
