@@ -10,6 +10,7 @@
     <meta property="og:title" content="nodemates-scanner - Node Probing Utility">
     <meta property="og:description" content="Asynchronous TLS configuration scanner with real-time web UI, GeoIP mapping, and automatic database indexing.">
     <meta property="og:type" content="website">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232997ff'/%3E%3Cpath d='M8 17h6l2-8 2 14 2-6h4' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="index.css">
 </head>
@@ -52,8 +53,8 @@
         <div id="scan-section">
             <form id="scan-form">
                 <div class="input-group">
-                    <label for="target" data-i18n="targetLabel">Target (IP, CIDR, or Domain)</label>
-                    <input type="text" id="target" name="target" data-i18n="targetPlaceholder" placeholder="e.g. 1.1.1.1, 107.172.103.0/24, or example.com" required>
+                    <label for="target" data-i18n="targetLabel">Target (IP expands to subnet, CIDR, or Domain)</label>
+                    <input type="text" id="target" name="target" data-i18n="targetPlaceholder" placeholder="e.g. 1.1.1.1 scans its /24, or use 107.172.103.0/24, example.com" required>
                 </div>
                 
                 <div class="input-row">
@@ -81,6 +82,38 @@
             </form>
 
             <section id="results-container">
+                <div class="task-panel" id="task-panel" aria-live="polite">
+                    <div class="task-panel-header">
+                        <div>
+                            <span class="task-eyebrow" data-i18n="taskEyebrow">Current Task</span>
+                            <div class="task-title" id="task-title" data-i18n="taskIdle">Ready to scan</div>
+                        </div>
+                        <div class="task-percent" id="task-percent">0%</div>
+                    </div>
+                    <div class="progress-track" aria-hidden="true">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="task-meta">
+                        <div class="task-meta-item">
+                            <span data-i18n="taskTarget">Target</span>
+                            <strong id="task-target">-</strong>
+                        </div>
+                        <div class="task-meta-item">
+                            <span data-i18n="taskPorts">Ports</span>
+                            <strong id="task-ports">-</strong>
+                        </div>
+                        <div class="task-meta-item">
+                            <span data-i18n="taskElapsed">Elapsed</span>
+                            <strong id="task-elapsed">00:00</strong>
+                        </div>
+                        <div class="task-meta-item">
+                            <span data-i18n="taskRate">Rate</span>
+                            <strong id="task-rate">0/min</strong>
+                        </div>
+                    </div>
+                    <div class="task-current" id="task-current" data-i18n="taskWaiting">Waiting for a scan request.</div>
+                </div>
+
                 <div class="stats">
                     <div class="stat-box">
                         <span class="stat-label" data-i18n="statScanned">Scanned</span>
@@ -96,13 +129,12 @@
                     <table id="results-table">
                         <thead>
                             <tr>
-                                <th data-i18n="thStatus">Status</th>
                                 <th data-i18n="thIP">IP</th>
                                 <th data-i18n="thPort">Port</th>
                                 <th data-i18n="thDomain">Domain</th>
                                 <th data-i18n="thALPN">ALPN</th>
                                 <th data-i18n="thIssuer">Issuer</th>
-                                <th data-i18n="thGeo">Geo</th>
+                                <th data-i18n="thCertType">Cert Type</th>
                             </tr>
                         </thead>
                         <tbody id="results-body">
@@ -113,27 +145,64 @@
         </div>
 
         <section id="history-section" style="display: none;">
-            <div class="input-row" style="margin-bottom: 1.5rem;">
+            <div class="library-header">
+                <div>
+                    <span class="task-eyebrow" data-i18n="libraryEyebrow">Node Library</span>
+                    <h2 data-i18n="libraryTitle">Discovered Nodes</h2>
+                </div>
+                <button id="clear-history-filters-btn" class="secondary-btn" data-i18n="btnClearFilters">Clear filters</button>
+            </div>
+
+            <div class="library-summary">
+                <div class="summary-tile">
+                    <span data-i18n="libraryReturned">Returned</span>
+                    <strong id="history-total">0</strong>
+                </div>
+                <div class="summary-tile">
+                    <span data-i18n="libraryGeos">Geos</span>
+                    <strong id="history-geo-count">0</strong>
+                </div>
+                <div class="summary-tile">
+                    <span data-i18n="libraryDomains">Domains</span>
+                    <strong id="history-domain-count">0</strong>
+                </div>
+            </div>
+
+            <div class="library-filters">
                 <div class="input-group">
-                    <label data-i18n="histGeoLabel">Filter by Geo (e.g. US)</label>
+                    <label data-i18n="histGeoLabel">Geo</label>
                     <input type="text" id="hist-geo" data-i18n="histGeoPlaceholder" placeholder="US">
                 </div>
                 <div class="input-group">
-                    <label data-i18n="histDomainLabel">Filter by Domain</label>
+                    <label data-i18n="histDomainLabel">Domain</label>
                     <input type="text" id="hist-domain" data-i18n="histDomainPlaceholder" placeholder="example.com">
                 </div>
-                <button id="fetch-history-btn" style="align-self: flex-end;" data-i18n="btnFetch">Fetch</button>
+                <div class="input-group">
+                    <label data-i18n="histPortLabel">Port</label>
+                    <input type="number" id="hist-port" data-i18n="histPortPlaceholder" placeholder="443" min="1" max="65535">
+                </div>
+                <div class="input-group">
+                    <label data-i18n="histLimitLabel">Limit</label>
+                    <input type="number" id="hist-limit" value="100" min="1" max="1000">
+                </div>
+                <button id="fetch-history-btn" data-i18n="btnFetch">Fetch</button>
             </div>
             
+            <div id="history-empty" class="empty-state" style="display: none;">
+                <strong data-i18n="libraryEmptyTitle">No nodes found</strong>
+                <span data-i18n="libraryEmptyText">Adjust filters or run a new scan to populate the library.</span>
+            </div>
+
             <div class="table-wrapper">
                 <table id="history-table">
                     <thead>
                         <tr>
                             <th data-i18n="thIP">IP</th>
                             <th data-i18n="thPort">Port</th>
+                            <th data-i18n="thEndpoint">Endpoint</th>
                             <th data-i18n="thDomain">Domain</th>
                             <th data-i18n="thIssuer">Issuer</th>
-                            <th data-i18n="thGeo">Geo</th>
+                            <th data-i18n="thCertType">Cert Type</th>
                             <th data-i18n="thScannedAt">Scanned At</th>
                             <th data-i18n="thAction">Action</th>
                         </tr>

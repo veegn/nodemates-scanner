@@ -10,6 +10,7 @@ use futures::stream::StreamExt;
 use ipnet::IpNet;
 use maxminddb::Reader;
 use rustls::ClientConfig;
+use serde_json::json;
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tokio_rustls::TlsConnector;
 
@@ -33,6 +34,7 @@ type DbResultRow = (
     String,
     i64,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -234,9 +236,10 @@ async fn check_scan_history(
 async fn resolve_target(
     target: &str,
     settings: &SystemSettings,
-) -> Result<(Vec<IpAddr>, Vec<String>), String> {
+) -> Result<(Vec<IpAddr>, Vec<String>, String), String> {
     let mut ips_to_scan = vec![];
     let mut origins = vec![];
+    let mut resolved_target = target.to_string();
 
     if let Ok(net) = IpNet::from_str(target) {
         match net {
@@ -261,9 +264,19 @@ async fn resolve_target(
             }
         }
     } else if let Ok(ip) = IpAddr::from_str(target) {
-        if !is_internal_ip(&ip) {
-            ips_to_scan.push(ip);
-            origins.push(target.to_string());
+        let prefix_len = match ip {
+            IpAddr::V4(_) => settings.max_cidr_ipv4,
+            IpAddr::V6(_) => settings.max_cidr_ipv6,
+        };
+        let net = IpNet::new(ip, prefix_len)
+            .map_err(|_| "Error: Failed to expand IP into subnet".to_string())?
+            .trunc();
+        resolved_target = net.to_string();
+        for ip in net.hosts() {
+            if !is_internal_ip(&ip) {
+                ips_to_scan.push(ip);
+                origins.push(ip.to_string());
+            }
         }
     } else {
         if let Ok(resolved) = tokio::net::lookup_host((target, 443)).await {
@@ -281,7 +294,7 @@ async fn resolve_target(
     if ips_to_scan.is_empty() {
         return Err("Error: No public IPs found".into());
     }
-    Ok((ips_to_scan, origins))
+    Ok((ips_to_scan, origins, resolved_target))
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
@@ -324,7 +337,15 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         return;
     }
 
-    let history_key = scan_history_key(&target, &ports, timeout_secs);
+    let (ips_to_scan, origins, resolved_target) = match resolve_target(&target, &settings).await {
+        Ok(res) => res,
+        Err(e) => {
+            let _ = socket.send(Message::Text(e)).await;
+            return;
+        }
+    };
+
+    let history_key = scan_history_key(&resolved_target, &ports, timeout_secs);
 
     let mut use_cache = false;
     let skip_tasks = match check_scan_history(&state.db, &history_key, &settings).await {
@@ -356,25 +377,26 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             .await;
     }
 
-    let (ips_to_scan, origins) = match resolve_target(&target, &settings).await {
-        Ok(res) => res,
-        Err(e) => {
-            let _ = socket.send(Message::Text(e)).await;
-            return;
-        }
-    };
-
     let total_tasks_count = ips_to_scan.len() * ports.len();
     let _ = socket
-        .send(Message::Text(format!(
-            r#"{{"type":"start","total":{}}}"#,
-            total_tasks_count
-        )))
+        .send(Message::Text(
+            json!({
+                "type": "start",
+                "mode": if use_cache { "cache" } else { "scan" },
+                "target": resolved_target,
+                "ports": ports,
+                "total": total_tasks_count,
+                "completed": skip_tasks,
+                "resumed": skip_tasks > 0,
+            })
+            .to_string(),
+        ))
         .await;
 
     if use_cache {
         let _ = socket.send(Message::Text(r#"{"type":"info","message":"Target scanned recently. Fetching results from cache..."}"#.to_string())).await;
 
+        let mut completed_tasks = 0usize;
         for (i, ip) in ips_to_scan.iter().enumerate() {
             let origin = &origins[i];
             for port in &ports {
@@ -410,8 +432,33 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 if socket.send(Message::Text(json)).await.is_err() {
                     return;
                 }
+                completed_tasks += 1;
+                let _ = socket
+                    .send(Message::Text(
+                        json!({
+                            "type": "progress",
+                            "mode": "cache",
+                            "completed": completed_tasks,
+                            "total": total_tasks_count,
+                            "ip": ip.to_string(),
+                            "port": port,
+                        })
+                        .to_string(),
+                    ))
+                    .await;
             }
         }
+        let _ = socket
+            .send(Message::Text(
+                json!({
+                    "type": "done",
+                    "status": "completed",
+                    "completed": completed_tasks,
+                    "total": total_tasks_count,
+                })
+                .to_string(),
+            ))
+            .await;
         return;
     }
 
@@ -438,14 +485,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let res = scan_tls(ip, origin, port, timeout_secs, tls, geo).await;
             if res.feasible
                 && let Err(e) = sqlx::query(
-                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, feasible, scanned_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, feasible, cert_type, scanned_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                      ON CONFLICT(ip, port) DO UPDATE SET
                      origin=excluded.origin, tls_version=excluded.tls_version, alpn=excluded.alpn, 
                      cert_domain=excluded.cert_domain, cert_issuer=excluded.cert_issuer, 
-                     geo_code=excluded.geo_code, feasible=excluded.feasible, scanned_at=CURRENT_TIMESTAMP"
+                     geo_code=excluded.geo_code, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP"
                 )
-                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(res.feasible)
+                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(res.feasible).bind(&res.cert_publickey)
                 .execute(&db).await
             {
                 eprintln!("DB Insert Error: {}", e);
@@ -488,6 +535,19 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         broken = true;
                         break;
                     }
+                    let _ = socket
+                        .send(Message::Text(
+                            json!({
+                                "type": "progress",
+                                "mode": "scan",
+                                "completed": completed_tasks,
+                                "total": total_tasks_count,
+                                "ip": res.ip,
+                                "port": res.port,
+                            })
+                            .to_string(),
+                        ))
+                        .await;
                 } else {
                     break;
                 }
@@ -518,9 +578,31 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         .bind(history_id)
         .execute(&state.db)
         .await;
+        let _ = socket
+            .send(Message::Text(
+                json!({
+                    "type": "done",
+                    "status": "stopped",
+                    "completed": completed_tasks,
+                    "total": total_tasks_count,
+                })
+                .to_string(),
+            ))
+            .await;
     } else {
         let _ = sqlx::query("UPDATE scan_history SET completed_tasks = ?, status = 'COMPLETED', scanned_at = CURRENT_TIMESTAMP WHERE id = ?")
             .bind(completed_tasks as i64).bind(history_id).execute(&state.db).await;
+        let _ = socket
+            .send(Message::Text(
+                json!({
+                    "type": "done",
+                    "status": "completed",
+                    "completed": completed_tasks,
+                    "total": total_tasks_count,
+                })
+                .to_string(),
+            ))
+            .await;
     }
 }
 
@@ -529,7 +611,7 @@ pub async fn get_results_handler(
     Query(query): Query<ResultsQuery>,
 ) -> Result<Json<Vec<DbScanResult>>, (StatusCode, String)> {
     let mut query_builder = sqlx::QueryBuilder::new(
-        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, scanned_at FROM scan_results WHERE feasible = true",
+        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, cert_type, scanned_at FROM scan_results WHERE feasible = true",
     );
 
     if let Some(geo) = query.geo_code {
@@ -540,6 +622,11 @@ pub async fn get_results_handler(
     if let Some(domain) = query.domain {
         query_builder.push(" AND cert_domain LIKE ");
         query_builder.push_bind(format!("%{}%", domain));
+    }
+
+    if let Some(port) = query.port {
+        query_builder.push(" AND port = ");
+        query_builder.push_bind(port);
     }
 
     query_builder.push(" ORDER BY scanned_at DESC");
@@ -565,7 +652,8 @@ pub async fn get_results_handler(
             cert_domain: row.5.unwrap_or_default(),
             cert_issuer: row.6.unwrap_or_default(),
             geo_code: row.7.unwrap_or_default(),
-            scanned_at: row.8.unwrap_or_default(),
+            cert_type: row.8.unwrap_or_default(),
+            scanned_at: row.9.unwrap_or_default(),
         })
         .collect();
 
@@ -593,4 +681,32 @@ pub async fn delete_result_handler(
     }
 
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_settings() -> SystemSettings {
+        SystemSettings {
+            concurrency_limit: 50,
+            max_cidr_ipv4: 24,
+            max_cidr_ipv6: 120,
+            cooldown_days: 30,
+            allowed_ports: "443".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn single_ipv4_target_expands_to_configured_subnet() {
+        let (ips, origins, resolved_target) = resolve_target("8.8.8.8", &test_settings())
+            .await
+            .expect("public IPv4 should resolve to its subnet");
+
+        assert_eq!(resolved_target, "8.8.8.0/24");
+        assert_eq!(ips.len(), 254);
+        assert_eq!(origins.len(), ips.len());
+        assert!(ips.iter().any(|ip| ip.to_string() == "8.8.8.8"));
+        assert!(origins.iter().any(|origin| origin == "8.8.8.8"));
+    }
 }

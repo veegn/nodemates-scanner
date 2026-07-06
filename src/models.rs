@@ -33,6 +33,7 @@ pub struct ScanResult {
 pub struct ResultsQuery {
     pub geo_code: Option<String>,
     pub domain: Option<String>,
+    pub port: Option<u16>,
     pub limit: Option<i64>,
 }
 
@@ -51,6 +52,7 @@ pub struct DbScanResult {
     pub cert_domain: String,
     pub cert_issuer: String,
     pub geo_code: String,
+    pub cert_type: String,
     pub scanned_at: String,
 }
 

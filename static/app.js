@@ -38,14 +38,13 @@ const translations = {
         taskFinishedSummary: "Finished {completed} of {total} tasks.",
         taskStoppedSummary: "Stopped at {completed} of {total}. Start again to resume.",
         taskPerMinute: "{count}/min",
-        thStatus: "Status",
         thIP: "IP",
         thPort: "Port",
         thEndpoint: "Endpoint",
         thDomain: "Domain",
         thALPN: "ALPN",
         thIssuer: "Issuer",
-        thGeo: "Geo",
+        thCertType: "Cert Type",
         thScannedAt: "Scanned At",
         thAction: "Action",
         libraryEyebrow: "Node Library",
@@ -116,14 +115,13 @@ const translations = {
         taskFinishedSummary: "已完成 {completed} / {total} 个任务。",
         taskStoppedSummary: "已停在 {completed} / {total}。再次开始可继续。",
         taskPerMinute: "{count}/分钟",
-        thStatus: "状态",
         thIP: "IP",
         thPort: "端口",
-        thEndpoint: "节点",
+        thEndpoint: "端点",
         thDomain: "域名",
         thALPN: "ALPN",
         thIssuer: "颁发者",
-        thGeo: "地理位置",
+        thCertType: "证书类型",
         thScannedAt: "扫描时间",
         thAction: "操作",
         libraryEyebrow: "节点图库",
@@ -487,7 +485,7 @@ async function fetchHistory() {
             endpointCell.className = 'endpoint-cell';
             appendDomainCell(tr, row.cert_domain, row.cert_issuer);
             appendIssuerCell(tr, row.cert_issuer);
-            appendTextCell(tr, row.geo_code);
+            appendTextCell(tr, row.cert_type);
 
             const scannedAtCell = appendTextCell(tr, row.scanned_at);
             scannedAtCell.style.fontSize = '0.85em';
@@ -792,23 +790,17 @@ function addResultRow(result) {
     }
 
     const tr = document.createElement('tr');
+    tr.className = result.feasible ? 'row-feasible' : 'row-invalid';
     tr.style.opacity = '0';
     tr.style.transform = 'translateY(10px)';
     tr.style.transition = 'all 0.3s ease';
-
-    const statusCell = document.createElement('td');
-    const statusBadge = document.createElement('span');
-    statusBadge.className = result.feasible ? 'badge badge-success' : 'badge badge-fail';
-    statusBadge.textContent = result.feasible ? t.badgeFeasible : t.badgeFailed;
-    statusCell.appendChild(statusBadge);
-    tr.appendChild(statusCell);
 
     appendTextCell(tr, result.ip);
     appendTextCell(tr, String(result.port));
     appendDomainCell(tr, result.cert_domain, result.cert_issuer);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);
-    appendTextCell(tr, result.geo_code);
+    appendTextCell(tr, result.cert_publickey);
 
     if (result.feasible) {
         resultsBody.insertBefore(tr, resultsBody.firstChild);

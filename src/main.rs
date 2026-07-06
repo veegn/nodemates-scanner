@@ -41,6 +41,7 @@ async fn main() {
             cert_issuer TEXT,
             geo_code TEXT,
             feasible BOOLEAN,
+            cert_type TEXT DEFAULT '-',
             scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_ip ON scan_results(ip);

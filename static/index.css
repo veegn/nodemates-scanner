@@ -598,6 +598,21 @@ tr:hover {
     background: rgba(255, 255, 255, 0.04);
 }
 
+.row-feasible {
+    background: rgba(52, 199, 89, 0.04);
+}
+.row-feasible:hover {
+    background: rgba(52, 199, 89, 0.08);
+}
+
+.row-invalid {
+    background: rgba(255, 59, 48, 0.04);
+    opacity: 0.7;
+}
+.row-invalid:hover {
+    background: rgba(255, 59, 48, 0.08);
+}
+
 .badge {
     padding: 0.3rem 0.8rem;
     border-radius: 999px;
