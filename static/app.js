@@ -208,7 +208,7 @@ const taskCurrent = document.getElementById('task-current');
 
 const tabScan = document.getElementById('tab-scan');
 const tabHistory = document.getElementById('tab-history');
-const tabSettings = document.getElementById('tab-settings');
+const navSettings = document.getElementById('nav-settings');
 const scanSection = document.getElementById('scan-section');
 const historySection = document.getElementById('history-section');
 const settingsSection = document.getElementById('settings-section');
@@ -244,7 +244,6 @@ applyLanguage(currentLang);
 tabScan.addEventListener('click', () => {
     tabScan.classList.add('active');
     tabHistory.classList.remove('active');
-    tabSettings.classList.remove('active');
     scanSection.style.display = 'block';
     historySection.style.display = 'none';
     settingsSection.style.display = 'none';
@@ -253,15 +252,14 @@ tabScan.addEventListener('click', () => {
 tabHistory.addEventListener('click', () => {
     tabHistory.classList.add('active');
     tabScan.classList.remove('active');
-    tabSettings.classList.remove('active');
     scanSection.style.display = 'none';
     historySection.style.display = 'block';
     settingsSection.style.display = 'none';
     fetchHistory();
 });
 
-tabSettings.addEventListener('click', () => {
-    tabSettings.classList.add('active');
+navSettings.addEventListener('click', (e) => {
+    e.preventDefault();
     tabScan.classList.remove('active');
     tabHistory.classList.remove('active');
     scanSection.style.display = 'none';
