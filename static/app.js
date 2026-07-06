@@ -295,6 +295,55 @@ function appendIssuerCell(row, value) {
     return td;
 }
 
+function extractCN(dn) {
+    if (!dn) return '-';
+    const match = dn.match(/CN=([^,]+)/i);
+    return match ? match[1].trim() : dn;
+}
+
+function appendDomainCell(row, fullDomain, fullIssuer) {
+    const td = document.createElement('td');
+    td.style.maxWidth = '200px';
+    td.style.whiteSpace = 'nowrap';
+    td.style.overflow = 'hidden';
+    td.style.textOverflow = 'ellipsis';
+    td.title = fullDomain || '';
+    
+    const cleanDomain = extractCN(fullDomain);
+    const span = document.createElement('span');
+    span.textContent = cleanDomain;
+    td.appendChild(span);
+    
+    if (fullDomain) {
+        const dUpper = fullDomain.toUpperCase();
+        const fakeKeywords = ['TRAEFIK DEFAULT CERT', 'KUBERNETES INGRESS', 'LOCALHOST', 'FAKE'];
+        let badgeText = null;
+        if (fakeKeywords.some(k => dUpper.includes(k))) {
+            badgeText = currentLang === 'zh' ? '伪造' : 'Fake';
+        } else if (fullDomain === fullIssuer) {
+            badgeText = currentLang === 'zh' ? '自签' : 'Self-Signed';
+        }
+        
+        if (badgeText) {
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-warning';
+            badge.style.marginLeft = '0.4rem';
+            badge.style.fontSize = '0.65rem';
+            badge.style.padding = '0.15rem 0.35rem';
+            badge.style.background = 'rgba(255, 149, 0, 0.15)';
+            badge.style.color = '#FF9500';
+            badge.style.border = '1px solid rgba(255, 149, 0, 0.3)';
+            badge.style.borderRadius = '4px';
+            badge.style.verticalAlign = 'middle';
+            badge.textContent = badgeText;
+            td.appendChild(badge);
+        }
+    }
+    
+    row.appendChild(td);
+    return td;
+}
+
 function formatElapsed(ms) {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
@@ -427,7 +476,7 @@ async function fetchHistory() {
             const endpoint = `${row.ip}:${row.port}`;
             const endpointCell = appendTextCell(tr, endpoint);
             endpointCell.className = 'endpoint-cell';
-            appendIssuerCell(tr, row.cert_domain);
+            appendDomainCell(tr, row.cert_domain, row.cert_issuer);
             appendIssuerCell(tr, row.cert_issuer);
             appendTextCell(tr, row.geo_code);
 
@@ -747,7 +796,7 @@ function addResultRow(result) {
 
     appendTextCell(tr, result.ip);
     appendTextCell(tr, String(result.port));
-    appendIssuerCell(tr, result.cert_domain);
+    appendDomainCell(tr, result.cert_domain, result.cert_issuer);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);
     appendTextCell(tr, result.geo_code);
