@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.80-slim as builder
+FROM rust:1.85-slim AS builder
 
 WORKDIR /usr/src/app
 COPY . .
@@ -11,7 +11,7 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 
 # Install ca-certificates (useful if you ever need outbound HTTPS requests)
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

@@ -182,6 +182,29 @@ tabSettings.addEventListener('click', () => {
     fetchSettings();
 });
 
+function clearChildren(element) {
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+}
+
+function appendTextCell(row, value) {
+    const td = document.createElement('td');
+    td.textContent = value || '-';
+    row.appendChild(td);
+    return td;
+}
+
+function appendIssuerCell(row, value) {
+    const td = appendTextCell(row, value);
+    td.style.maxWidth = '200px';
+    td.style.whiteSpace = 'nowrap';
+    td.style.overflow = 'hidden';
+    td.style.textOverflow = 'ellipsis';
+    td.title = value || '';
+    return td;
+}
+
 async function fetchHistory() {
     const geo = document.getElementById('hist-geo').value.trim();
     const domain = document.getElementById('hist-domain').value.trim();
@@ -195,29 +218,37 @@ async function fetchHistory() {
         if (!res.ok) throw new Error('Failed to fetch history');
         const data = await res.json();
         
-        historyBody.innerHTML = '';
+        clearChildren(historyBody);
         for (const row of data) {
             const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${row.ip}</td>
-                <td>${row.port}</td>
-                <td>${row.cert_domain || '-'}</td>
-                <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${row.cert_issuer}">${row.cert_issuer || '-'}</td>
-                <td>${row.geo_code}</td>
-                <td style="font-size: 0.85em; color: var(--text-secondary);">${row.scanned_at}</td>
-                <td>
-                    <button class="delete-btn" data-ip="${row.ip}">${t.btnDelete}</button>
-                </td>
-            `;
+            appendTextCell(tr, row.ip);
+            appendTextCell(tr, String(row.port));
+            appendTextCell(tr, row.cert_domain);
+            appendIssuerCell(tr, row.cert_issuer);
+            appendTextCell(tr, row.geo_code);
+
+            const scannedAtCell = appendTextCell(tr, row.scanned_at);
+            scannedAtCell.style.fontSize = '0.85em';
+            scannedAtCell.style.color = 'var(--text-secondary)';
+
+            const actionCell = document.createElement('td');
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.dataset.ip = row.ip;
+            deleteBtn.dataset.port = row.port;
+            deleteBtn.textContent = t.btnDelete;
+            actionCell.appendChild(deleteBtn);
+            tr.appendChild(actionCell);
             historyBody.appendChild(tr);
         }
 
         document.querySelectorAll('.delete-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const ip = e.target.getAttribute('data-ip');
+                const port = e.target.getAttribute('data-port');
                 if (confirm(t.alertDeleteConfirm.replace('{ip}', ip))) {
                     try {
-                        const delRes = await fetch(`/results/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+                        const delRes = await fetch(`/results/${encodeURIComponent(ip)}?port=${encodeURIComponent(port)}`, { method: 'DELETE' });
                         if (!delRes.ok) throw new Error('Failed to delete');
                         e.target.closest('tr').remove();
                     } catch (err) {
@@ -270,7 +301,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
             body: JSON.stringify(settings)
         });
         if (!res.ok) throw new Error('Failed to save settings');
-        alert(lang === 'zh' ? '设置已保存' : 'Settings saved successfully');
+        alert(currentLang === 'zh' ? '设置已保存' : 'Settings saved successfully');
     } catch (err) {
         alert(err.message);
     } finally {
@@ -294,7 +325,7 @@ form.addEventListener('submit', async (e) => {
         return;
     }
 
-    resultsBody.innerHTML = '';
+    clearChildren(resultsBody);
     scannedCount = 0;
     feasibleCount = 0;
     totalTasks = 0;
@@ -342,7 +373,13 @@ form.addEventListener('submit', async (e) => {
 
         if (result.type === 'info') {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td colspan="7" style="text-align:center; color:var(--accent-primary); font-weight:500;">${result.message}</td>`;
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.style.textAlign = 'center';
+            td.style.color = 'var(--accent-primary)';
+            td.style.fontWeight = '500';
+            td.textContent = result.message;
+            tr.appendChild(td);
             resultsBody.insertBefore(tr, resultsBody.firstChild);
             return;
         }
@@ -388,19 +425,19 @@ function addResultRow(result) {
     tr.style.transform = 'translateY(10px)';
     tr.style.transition = 'all 0.3s ease';
 
-    const statusBadge = result.feasible 
-        ? `<span class="badge badge-success">${t.badgeFeasible}</span>`
-        : `<span class="badge badge-fail">${t.badgeFailed}</span>`;
+    const statusCell = document.createElement('td');
+    const statusBadge = document.createElement('span');
+    statusBadge.className = result.feasible ? 'badge badge-success' : 'badge badge-fail';
+    statusBadge.textContent = result.feasible ? t.badgeFeasible : t.badgeFailed;
+    statusCell.appendChild(statusBadge);
+    tr.appendChild(statusCell);
 
-    tr.innerHTML = `
-        <td>${statusBadge}</td>
-        <td>${result.ip}</td>
-        <td>${result.port}</td>
-        <td>${result.cert_domain || '-'}</td>
-        <td>${result.alpn || '-'}</td>
-        <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${result.cert_issuer}">${result.cert_issuer || '-'}</td>
-        <td>${result.geo_code}</td>
-    `;
+    appendTextCell(tr, result.ip);
+    appendTextCell(tr, String(result.port));
+    appendTextCell(tr, result.cert_domain);
+    appendTextCell(tr, result.alpn);
+    appendIssuerCell(tr, result.cert_issuer);
+    appendTextCell(tr, result.geo_code);
 
     if (result.feasible) {
         resultsBody.insertBefore(tr, resultsBody.firstChild);

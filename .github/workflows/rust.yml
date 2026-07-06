@@ -23,11 +23,15 @@ jobs:
         
     - name: Check formatting
       run: cargo fmt -- --check
-      continue-on-error: true
 
     - name: Run Clippy
       run: cargo clippy -- -D warnings
-      continue-on-error: true
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Check frontend JavaScript
+      run: node --check static/app.js
 
     - name: Build
       run: cargo build --verbose
@@ -69,4 +73,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-

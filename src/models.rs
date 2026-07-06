@@ -36,6 +36,11 @@ pub struct ResultsQuery {
     pub limit: Option<i64>,
 }
 
+#[derive(Deserialize)]
+pub struct DeleteResultQuery {
+    pub port: Option<u16>,
+}
+
 #[derive(Serialize)]
 pub struct DbScanResult {
     pub ip: String,
@@ -57,4 +62,3 @@ pub struct SystemSettings {
     pub cooldown_days: u32,
     pub allowed_ports: String,
 }
-

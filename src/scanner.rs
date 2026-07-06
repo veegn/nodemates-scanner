@@ -1,13 +1,17 @@
+use maxminddb::Reader;
 use rustls::{
+    DigitallySignedStruct,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, ServerName, UnixTime},
-    DigitallySignedStruct,
 };
-use std::{net::{IpAddr, SocketAddr}, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::TlsConnector;
 use x509_parser::parse_x509_certificate;
-use maxminddb::Reader;
 
 use crate::models::ScanResult;
 
@@ -25,7 +29,7 @@ impl ServerCertVerifier for DummyVerifier {
     ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
     }
-    
+
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
@@ -43,7 +47,7 @@ impl ServerCertVerifier for DummyVerifier {
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
-    
+
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         vec![
             rustls::SignatureScheme::RSA_PKCS1_SHA1,
@@ -70,16 +74,55 @@ pub fn is_internal_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
             let octets = ipv4.octets();
-            if octets[0] == 10 { return true; }
-            if octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31 { return true; }
-            if octets[0] == 192 && octets[1] == 168 { return true; }
-            if octets[0] == 169 && octets[1] == 254 { return true; }
-            if octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127 { return true; }
+            if octets[0] == 0 {
+                return true;
+            }
+            if octets[0] == 10 {
+                return true;
+            }
+            if octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31 {
+                return true;
+            }
+            if octets[0] == 192 && octets[1] == 168 {
+                return true;
+            }
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
+                return true;
+            }
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 2 {
+                return true;
+            }
+            if octets[0] == 169 && octets[1] == 254 {
+                return true;
+            }
+            if octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127 {
+                return true;
+            }
+            if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
+                return true;
+            }
+            if octets[0] == 198 && octets[1] == 51 && octets[2] == 100 {
+                return true;
+            }
+            if octets[0] == 203 && octets[1] == 0 && octets[2] == 113 {
+                return true;
+            }
+            if octets[0] >= 240 {
+                return true;
+            }
             false
-        },
+        }
         IpAddr::V6(ipv6) => {
             let segments = ipv6.segments();
-            if segments[0] & 0xfe00 == 0xfc00 { return true; }
+            if segments[0] & 0xfe00 == 0xfc00 {
+                return true;
+            }
+            if segments[0] & 0xffc0 == 0xfe80 {
+                return true;
+            }
+            if segments[0] == 0x2001 && segments[1] == 0x0db8 {
+                return true;
+            }
             false
         }
     }
@@ -103,22 +146,20 @@ pub fn default_fail_result(ip: IpAddr, port: u16, origin: String, geo_code: Stri
 }
 
 pub async fn scan_tls(
-    ip: IpAddr, 
-    origin: String, 
-    port: u16, 
-    timeout_secs: u64, 
-    tls_connector: TlsConnector, 
-    geo_reader: Option<Arc<Reader<Vec<u8>>>>
+    ip: IpAddr,
+    origin: String,
+    port: u16,
+    timeout_secs: u64,
+    tls_connector: TlsConnector,
+    geo_reader: Option<Arc<Reader<Vec<u8>>>>,
 ) -> ScanResult {
     let mut geo_code = "N/A".to_string();
-    if let Some(geo) = &geo_reader {
-        if let Ok(country) = geo.lookup::<maxminddb::geoip2::Country>(ip) {
-            if let Some(c) = country.country {
-                if let Some(iso) = c.iso_code {
-                    geo_code = iso.to_string();
-                }
-            }
-        }
+    if let Some(geo) = &geo_reader
+        && let Ok(country) = geo.lookup::<maxminddb::geoip2::Country>(ip)
+        && let Some(c) = country.country
+        && let Some(iso) = c.iso_code
+    {
+        geo_code = iso.to_string();
     }
 
     let addr = SocketAddr::new(ip, port);
@@ -140,7 +181,10 @@ pub async fn scan_tls(
 
     let (_, connection) = tls_stream.into_inner();
 
-    let alpn = connection.alpn_protocol().map(|v| String::from_utf8_lossy(v).to_string()).unwrap_or_default();
+    let alpn = connection
+        .alpn_protocol()
+        .map(|v| String::from_utf8_lossy(v).to_string())
+        .unwrap_or_default();
     let tls_version = match connection.protocol_version() {
         Some(rustls::ProtocolVersion::TLSv1_3) => "TLS 1.3".to_string(),
         Some(rustls::ProtocolVersion::TLSv1_2) => "TLS 1.2".to_string(),
@@ -157,16 +201,22 @@ pub async fn scan_tls(
     let mut cert_signature = String::new();
     let mut cert_publickey = String::new();
 
-    if let Some(leaf) = certs.first() {
-        if let Ok((_, parsed_cert)) = parse_x509_certificate(leaf.as_ref()) {
-            cert_domain = parsed_cert.subject().to_string();
-            cert_issuer = parsed_cert.issuer().to_string();
-            cert_signature = format!("{:?}", parsed_cert.signature_algorithm.algorithm);
-            cert_publickey = format!("{:?}", parsed_cert.tbs_certificate.subject_pki.algorithm.algorithm);
-        }
+    if let Some(leaf) = certs.first()
+        && let Ok((_, parsed_cert)) = parse_x509_certificate(leaf.as_ref())
+    {
+        cert_domain = parsed_cert.subject().to_string();
+        cert_issuer = parsed_cert.issuer().to_string();
+        cert_signature = format!("{:?}", parsed_cert.signature_algorithm.algorithm);
+        cert_publickey = format!(
+            "{:?}",
+            parsed_cert.tbs_certificate.subject_pki.algorithm.algorithm
+        );
     }
 
-    let feasible = tls_version == "TLS 1.3" && alpn == "h2" && !cert_domain.is_empty() && !cert_issuer.is_empty();
+    let feasible = tls_version == "TLS 1.3"
+        && alpn == "h2"
+        && !cert_domain.is_empty()
+        && !cert_issuer.is_empty();
 
     ScanResult {
         ip: ip.to_string(),

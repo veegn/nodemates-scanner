@@ -11,3 +11,4 @@ RealiTLScanner.exe
 # Added by cargo
 
 /target
+results.db
