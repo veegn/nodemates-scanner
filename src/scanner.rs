@@ -141,6 +141,7 @@ pub fn default_fail_result(ip: IpAddr, port: u16, origin: String, geo_code: Stri
         cert_domain: "".into(),
         cert_issuer: "".into(),
         geo_code,
+        asn_org: "".into(),
         feasible: false,
     }
 }
@@ -152,6 +153,7 @@ pub async fn scan_tls(
     timeout_secs: u64,
     tls_connector: TlsConnector,
     geo_reader: Option<Arc<Reader<Vec<u8>>>>,
+    asn_reader: Option<Arc<Reader<Vec<u8>>>>,
 ) -> ScanResult {
     let mut geo_code = "N/A".to_string();
     if let Some(geo) = &geo_reader
@@ -160,6 +162,14 @@ pub async fn scan_tls(
         && let Some(iso) = c.iso_code
     {
         geo_code = iso.to_string();
+    }
+
+    let mut asn_org = "".to_string();
+    if let Some(asn_db) = &asn_reader
+        && let Ok(asn) = asn_db.lookup::<maxminddb::geoip2::Asn>(ip)
+        && let Some(org) = asn.autonomous_system_organization
+    {
+        asn_org = org.to_string();
     }
 
     let addr = SocketAddr::new(ip, port);
@@ -230,6 +240,7 @@ pub async fn scan_tls(
         cert_domain,
         cert_issuer,
         geo_code,
+        asn_org,
         feasible,
     }
 }

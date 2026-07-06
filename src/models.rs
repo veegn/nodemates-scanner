@@ -26,6 +26,7 @@ pub struct ScanResult {
     pub cert_domain: String,
     pub cert_issuer: String,
     pub geo_code: String,
+    pub asn_org: String,
     pub feasible: bool,
 }
 
@@ -53,6 +54,7 @@ pub struct DbScanResult {
     pub cert_issuer: String,
     pub geo_code: String,
     pub cert_type: String,
+    pub asn_org: String,
     pub scanned_at: String,
 }
 

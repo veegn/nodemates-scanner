@@ -28,12 +28,14 @@ type CachedResultRow = (
     String,
     String,
     String,
+    String,
     bool,
 );
 type DbResultRow = (
     String,
     i64,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -401,7 +403,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let origin = &origins[i];
             for port in &ports {
                 let row: Option<CachedResultRow> = sqlx::query_as(
-                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
+                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
                 )
                 .bind(ip.to_string())
                 .bind(*port as i64)
@@ -422,7 +424,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         cert_domain: r.5,
                         cert_issuer: r.6,
                         geo_code: r.7,
-                        feasible: r.8,
+                        asn_org: r.8,
+                        feasible: r.9,
                     }
                 } else {
                     crate::scanner::default_fail_result(*ip, *port, origin.clone(), "N/A".into())
@@ -470,6 +473,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let tls_connector = TlsConnector::from(Arc::new(config));
 
     let geo_reader = Reader::open_readfile("Country.mmdb").ok().map(Arc::new);
+    let asn_reader = Reader::open_readfile("GeoLite2-ASN.mmdb").ok().map(Arc::new);
 
     let concurrency_limit = settings.concurrency_limit as usize;
     let total_tasks_count = ips_to_scan.len() * ports.len();
@@ -480,19 +484,20 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     }).map(|(ip, origin, port)| {
         let tls = tls_connector.clone();
         let geo = geo_reader.clone();
+        let asn = asn_reader.clone();
         let db = state.db.clone();
         async move {
-            let res = scan_tls(ip, origin, port, timeout_secs, tls, geo).await;
+            let res = scan_tls(ip, origin, port, timeout_secs, tls, geo, asn).await;
             if res.feasible
                 && let Err(e) = sqlx::query(
-                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, feasible, cert_type, scanned_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, feasible, cert_type, scanned_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                      ON CONFLICT(ip, port) DO UPDATE SET
                      origin=excluded.origin, tls_version=excluded.tls_version, alpn=excluded.alpn, 
                      cert_domain=excluded.cert_domain, cert_issuer=excluded.cert_issuer, 
-                     geo_code=excluded.geo_code, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP"
+                     geo_code=excluded.geo_code, asn_org=excluded.asn_org, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP"
                 )
-                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(res.feasible).bind(&res.cert_publickey)
+                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(&res.asn_org).bind(res.feasible).bind(&res.cert_publickey)
                 .execute(&db).await
             {
                 eprintln!("DB Insert Error: {}", e);
@@ -611,7 +616,7 @@ pub async fn get_results_handler(
     Query(query): Query<ResultsQuery>,
 ) -> Result<Json<Vec<DbScanResult>>, (StatusCode, String)> {
     let mut query_builder = sqlx::QueryBuilder::new(
-        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, cert_type, scanned_at FROM scan_results WHERE feasible = true",
+        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, cert_type, scanned_at, asn_org FROM scan_results WHERE feasible = true",
     );
 
     if let Some(geo) = query.geo_code {
@@ -654,6 +659,7 @@ pub async fn get_results_handler(
             geo_code: row.7.unwrap_or_default(),
             cert_type: row.8.unwrap_or_default(),
             scanned_at: row.9.unwrap_or_default(),
+            asn_org: row.10.unwrap_or_default(),
         })
         .collect();
 

@@ -98,6 +98,9 @@ async fn main() {
     let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN total_tasks INTEGER DEFAULT 0")
         .execute(&db)
         .await;
+    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_org TEXT DEFAULT ''")
+        .execute(&db)
+        .await;
     let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN completed_tasks INTEGER DEFAULT 0")
         .execute(&db)
         .await;
@@ -163,7 +166,7 @@ async fn run_health_check(db: sqlx::sqlite::SqlitePool) {
         let tls = tls_connector.clone();
         async move {
             if let Ok(ip) = IpAddr::from_str(&ip_str) {
-                let res = scan_tls(ip, origin, port as u16, 5, tls, None).await;
+                let res = scan_tls(ip, origin, port as u16, 5, tls, None, None).await;
                 if !res.feasible {
                     if let Err(e) = sqlx::query("UPDATE scan_results SET feasible = false WHERE ip = ? AND port = ?")
                         .bind(&ip_str).bind(port).execute(&db).await {
@@ -184,34 +187,33 @@ async fn run_health_check(db: sqlx::sqlite::SqlitePool) {
 }
 
 async fn ensure_geo_db() {
-    let db_path = "Country.mmdb";
-    if !std::path::Path::new(db_path).exists() {
-        println!("GeoIP Database (Country.mmdb) not found. Downloading...");
-        match reqwest::get(
-            "https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb",
-        )
-        .await
-        {
-            Ok(response) => {
-                if response.status().is_success() {
-                    if let Ok(bytes) = response.bytes().await {
-                        if std::fs::write(db_path, bytes).is_ok() {
-                            println!("GeoIP Database downloaded successfully.");
+    let dbs = vec![
+        ("Country.mmdb", "https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb"),
+        ("GeoLite2-ASN.mmdb", "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb"),
+    ];
+
+    for (db_path, url) in dbs {
+        if !std::path::Path::new(db_path).exists() {
+            println!("Database ({}) not found. Downloading...", db_path);
+            match reqwest::get(url).await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        if let Ok(bytes) = response.bytes().await {
+                            if std::fs::write(db_path, bytes).is_ok() {
+                                println!("Database {} downloaded successfully.", db_path);
+                            } else {
+                                println!("Failed to write Database {} to disk.", db_path);
+                            }
                         } else {
-                            println!("Failed to write GeoIP Database to disk.");
+                            println!("Failed to read Database {} response body.", db_path);
                         }
                     } else {
-                        println!("Failed to read GeoIP Database response body.");
+                        println!("Failed to download Database {}, status code: {}", db_path, response.status());
                     }
-                } else {
-                    println!(
-                        "Failed to download GeoIP Database, status code: {}",
-                        response.status()
-                    );
                 }
-            }
-            Err(e) => {
-                println!("Failed to download GeoIP Database: {}", e);
+                Err(e) => {
+                    println!("Failed to download Database {}: {}", db_path, e);
+                }
             }
         }
     }

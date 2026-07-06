@@ -276,10 +276,13 @@ function clearChildren(element) {
     }
 }
 
-function appendTextCell(row, value) {
+function appendTextCell(tr, text, tooltipText = null) {
     const td = document.createElement('td');
-    td.textContent = value || '-';
-    row.appendChild(td);
+    td.textContent = text;
+    if (tooltipText) {
+        td.title = tooltipText;
+    }
+    tr.appendChild(td);
     return td;
 }
 
@@ -308,7 +311,7 @@ function extractCN(dn) {
     return match ? match[1].trim() : dn;
 }
 
-function appendDomainCell(row, fullDomain, fullIssuer) {
+function appendDomainCell(tr, fullDomain, fullIssuer, asnOrg) {
     const td = document.createElement('td');
     td.style.maxWidth = '200px';
     td.style.whiteSpace = 'nowrap';
@@ -327,7 +330,7 @@ function appendDomainCell(row, fullDomain, fullIssuer) {
         const popularDest = ['CLOUDFLARE', 'GOOGLE', 'APPLE', 'MICROSOFT', 'BING', 'ITUNES', 'AKAMAI', 'FASTLY', 'AMAZON', 'AWS'];
         
         let badgeText = null;
-        let badgeType = null; // 'warning' or 'info'
+        let badgeType = null; // 'warning' or 'info' or 'danger'
         
         if (fakeKeywords.some(k => dUpper.includes(k))) {
             badgeText = currentLang === 'zh' ? '伪造' : 'Fake';
@@ -336,8 +339,16 @@ function appendDomainCell(row, fullDomain, fullIssuer) {
             badgeText = currentLang === 'zh' ? '自签' : 'Self-Signed';
             badgeType = 'warning';
         } else if (popularDest.some(k => dUpper.includes(k))) {
-            badgeText = currentLang === 'zh' ? '大厂/疑似转发' : 'CDN/Proxy';
-            badgeType = 'info';
+            const orgUpper = (asnOrg || '').toUpperCase();
+            const domainKeyword = popularDest.find(k => dUpper.includes(k));
+            
+            if (orgUpper && !orgUpper.includes(domainKeyword) && !orgUpper.includes('CLOUDFLARE') && !orgUpper.includes('GOOGLE') && !orgUpper.includes('AKAMAI')) {
+                badgeText = currentLang === 'zh' ? '高可疑/伪造' : 'High Suspicion/Fake';
+                badgeType = 'danger';
+            } else {
+                badgeText = currentLang === 'zh' ? '大厂/疑似转发' : 'CDN/Proxy';
+                badgeType = 'info';
+            }
         }
         
         if (badgeText) {
@@ -357,6 +368,10 @@ function appendDomainCell(row, fullDomain, fullIssuer) {
                 badge.style.background = 'rgba(41, 151, 255, 0.15)';
                 badge.style.color = 'var(--accent-primary)';
                 badge.style.border = '1px solid rgba(41, 151, 255, 0.3)';
+            } else if (badgeType === 'danger') {
+                badge.style.background = 'rgba(255, 59, 48, 0.15)';
+                badge.style.color = '#FF3B30';
+                badge.style.border = '1px solid rgba(255, 59, 48, 0.3)';
             }
             
             badge.textContent = badgeText;
@@ -364,7 +379,7 @@ function appendDomainCell(row, fullDomain, fullIssuer) {
         }
     }
     
-    row.appendChild(td);
+    tr.appendChild(td);
     return td;
 }
 
@@ -495,12 +510,12 @@ async function fetchHistory() {
 
         for (const row of data) {
             const tr = document.createElement('tr');
-            appendTextCell(tr, row.ip);
+            appendTextCell(tr, row.ip, row.asn_org ? `ASN: ${row.asn_org}` : null);
             appendTextCell(tr, String(row.port));
             const endpoint = `${row.ip}:${row.port}`;
             const endpointCell = appendTextCell(tr, endpoint);
             endpointCell.className = 'endpoint-cell';
-            appendDomainCell(tr, row.cert_domain, row.cert_issuer);
+            appendDomainCell(tr, row.cert_domain, row.cert_issuer, row.asn_org);
             appendIssuerCell(tr, row.cert_issuer);
             appendTextCell(tr, row.cert_type);
 
@@ -812,9 +827,9 @@ function addResultRow(result) {
     tr.style.transform = 'translateY(10px)';
     tr.style.transition = 'all 0.3s ease';
 
-    appendTextCell(tr, result.ip);
+    appendTextCell(tr, result.ip, result.asn_org ? `ASN: ${result.asn_org}` : null);
     appendTextCell(tr, String(result.port));
-    appendDomainCell(tr, result.cert_domain, result.cert_issuer);
+    appendDomainCell(tr, result.cert_domain, result.cert_issuer, result.asn_org);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);
     appendTextCell(tr, result.cert_publickey);
