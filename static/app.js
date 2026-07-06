@@ -286,6 +286,28 @@ function appendTextCell(tr, text, tooltipText = null) {
     return td;
 }
 
+function appendLatencyCell(tr, latencyMs) {
+    const td = document.createElement('td');
+    td.style.fontWeight = '600';
+    
+    if (latencyMs === 0 || !latencyMs) {
+        td.textContent = '-';
+        td.style.color = 'var(--text-secondary)';
+    } else {
+        td.textContent = `${latencyMs}ms`;
+        if (latencyMs < 100) {
+            td.style.color = '#34C759'; // Green
+        } else if (latencyMs < 250) {
+            td.style.color = '#FF9500'; // Orange
+        } else {
+            td.style.color = '#FF3B30'; // Red
+        }
+    }
+    
+    tr.appendChild(td);
+    return td;
+}
+
 function extractIssuerName(dn) {
     if (!dn) return '-';
     const oMatch = dn.match(/O=([^,]+)/i);
@@ -512,13 +534,12 @@ async function fetchHistory() {
             const tr = document.createElement('tr');
             appendTextCell(tr, row.ip, row.asn_org ? `ASN: ${row.asn_org}` : null);
             appendTextCell(tr, String(row.port));
-            const endpoint = `${row.ip}:${row.port}`;
-            const endpointCell = appendTextCell(tr, endpoint);
-            endpointCell.className = 'endpoint-cell';
+            appendLatencyCell(tr, row.latency);
+            appendTextCell(tr, row.tls_version);
             appendDomainCell(tr, row.cert_domain, row.cert_issuer, row.asn_org);
+            appendTextCell(tr, row.cert_validity);
+            appendTextCell(tr, row.alpn);
             appendIssuerCell(tr, row.cert_issuer);
-            appendTextCell(tr, row.cert_type);
-
             const scannedAtCell = appendTextCell(tr, row.scanned_at);
             scannedAtCell.style.fontSize = '0.85em';
             scannedAtCell.style.color = 'var(--text-secondary)';
@@ -829,10 +850,12 @@ function addResultRow(result) {
 
     appendTextCell(tr, result.ip, result.asn_org ? `ASN: ${result.asn_org}` : null);
     appendTextCell(tr, String(result.port));
+    appendLatencyCell(tr, result.latency);
+    appendTextCell(tr, result.tls_version);
     appendDomainCell(tr, result.cert_domain, result.cert_issuer, result.asn_org);
+    appendTextCell(tr, result.cert_validity);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);
-    appendTextCell(tr, result.cert_publickey);
 
     if (result.feasible) {
         resultsBody.insertBefore(tr, resultsBody.firstChild);

@@ -142,6 +142,8 @@ pub fn default_fail_result(ip: IpAddr, port: u16, origin: String, geo_code: Stri
         cert_issuer: "".into(),
         geo_code,
         asn_org: "".into(),
+        latency: 0,
+        cert_validity: "".into(),
         feasible: false,
     }
 }
@@ -172,6 +174,8 @@ pub async fn scan_tls(
         asn_org = org.to_string();
     }
 
+    let start_time = tokio::time::Instant::now();
+
     let addr = SocketAddr::new(ip, port);
     let connect_future = TcpStream::connect(addr);
     let tcp_stream = match timeout(Duration::from_secs(timeout_secs), connect_future).await {
@@ -188,6 +192,8 @@ pub async fn scan_tls(
         Ok(Ok(s)) => s,
         _ => return default_fail_result(ip, port, origin, geo_code),
     };
+    
+    let latency = start_time.elapsed().as_millis() as u32;
 
     let (_, connection) = tls_stream.into_inner();
 
@@ -210,6 +216,7 @@ pub async fn scan_tls(
     let mut cert_issuer = String::new();
     let mut cert_signature = String::new();
     let mut cert_publickey = String::new();
+    let mut cert_validity = String::new();
 
     if let Some(leaf) = certs.first()
         && let Ok((_, parsed_cert)) = parse_x509_certificate(leaf.as_ref())
@@ -221,6 +228,15 @@ pub async fn scan_tls(
             "{:?}",
             parsed_cert.tbs_certificate.subject_pki.algorithm.algorithm
         );
+        let validity = &parsed_cert.validity;
+        let not_before = validity.not_before.timestamp();
+        let not_after = validity.not_after.timestamp();
+        if not_after > not_before {
+            let days = (not_after - not_before) / 86400;
+            cert_validity = format!("{} Days", days);
+        } else {
+            cert_validity = "Expired/Invalid".to_string();
+        }
     }
 
     let feasible = tls_version == "TLS 1.3"
@@ -241,6 +257,8 @@ pub async fn scan_tls(
         cert_issuer,
         geo_code,
         asn_org,
+        latency,
+        cert_validity,
         feasible,
     }
 }

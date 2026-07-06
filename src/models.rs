@@ -23,10 +23,12 @@ pub struct ScanResult {
     pub cert_length: String,
     pub cert_signature: String,
     pub cert_publickey: String,
+    pub cert_validity: String,
     pub cert_domain: String,
     pub cert_issuer: String,
     pub geo_code: String,
     pub asn_org: String,
+    pub latency: u32,
     pub feasible: bool,
 }
 
@@ -52,9 +54,11 @@ pub struct DbScanResult {
     pub alpn: String,
     pub cert_domain: String,
     pub cert_issuer: String,
+    pub cert_validity: String,
     pub geo_code: String,
     pub cert_type: String,
     pub asn_org: String,
+    pub latency: u32,
     pub scanned_at: String,
 }
 

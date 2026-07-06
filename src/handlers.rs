@@ -29,6 +29,8 @@ type CachedResultRow = (
     String,
     String,
     String,
+    i64,
+    String,
     bool,
 );
 type DbResultRow = (
@@ -42,6 +44,8 @@ type DbResultRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<i64>,
     Option<String>,
 );
 
@@ -403,7 +407,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let origin = &origins[i];
             for port in &ports {
                 let row: Option<CachedResultRow> = sqlx::query_as(
-                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
+                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, latency, cert_validity, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
                 )
                 .bind(ip.to_string())
                 .bind(*port as i64)
@@ -425,7 +429,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         cert_issuer: r.6,
                         geo_code: r.7,
                         asn_org: r.8,
-                        feasible: r.9,
+                        latency: r.9 as u32,
+                        cert_validity: r.10,
+                        feasible: r.11,
                     }
                 } else {
                     crate::scanner::default_fail_result(*ip, *port, origin.clone(), "N/A".into())
@@ -490,14 +496,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let res = scan_tls(ip, origin, port, timeout_secs, tls, geo, asn).await;
             if res.feasible
                 && let Err(e) = sqlx::query(
-                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, feasible, cert_type, scanned_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, latency, cert_validity, feasible, cert_type, scanned_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                      ON CONFLICT(ip, port) DO UPDATE SET
                      origin=excluded.origin, tls_version=excluded.tls_version, alpn=excluded.alpn, 
                      cert_domain=excluded.cert_domain, cert_issuer=excluded.cert_issuer, 
-                     geo_code=excluded.geo_code, asn_org=excluded.asn_org, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP"
+                     geo_code=excluded.geo_code, asn_org=excluded.asn_org, latency=excluded.latency, cert_validity=excluded.cert_validity, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP"
                 )
-                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(&res.asn_org).bind(res.feasible).bind(&res.cert_publickey)
+                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(&res.asn_org).bind(res.latency).bind(&res.cert_validity).bind(res.feasible).bind(&res.cert_publickey)
                 .execute(&db).await
             {
                 eprintln!("DB Insert Error: {}", e);
@@ -616,7 +622,7 @@ pub async fn get_results_handler(
     Query(query): Query<ResultsQuery>,
 ) -> Result<Json<Vec<DbScanResult>>, (StatusCode, String)> {
     let mut query_builder = sqlx::QueryBuilder::new(
-        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, cert_type, scanned_at, asn_org FROM scan_results WHERE feasible = true",
+        "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, cert_type, scanned_at, asn_org, latency, cert_validity FROM scan_results WHERE feasible = true",
     );
 
     if let Some(geo) = query.geo_code {
@@ -660,6 +666,8 @@ pub async fn get_results_handler(
             cert_type: row.8.unwrap_or_default(),
             scanned_at: row.9.unwrap_or_default(),
             asn_org: row.10.unwrap_or_default(),
+            latency: row.11.unwrap_or(0) as u32,
+            cert_validity: row.12.unwrap_or_default(),
         })
         .collect();
 

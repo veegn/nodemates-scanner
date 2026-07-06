@@ -101,6 +101,12 @@ async fn main() {
     let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_org TEXT DEFAULT ''")
         .execute(&db)
         .await;
+    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN latency INTEGER DEFAULT 0")
+        .execute(&db)
+        .await;
+    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN cert_validity TEXT DEFAULT ''")
+        .execute(&db)
+        .await;
     let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN completed_tasks INTEGER DEFAULT 0")
         .execute(&db)
         .await;
