@@ -43,7 +43,6 @@ async fn main() {
             cert_validity TEXT DEFAULT '',
             scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_port ON scan_results(ip, port);
         CREATE INDEX IF NOT EXISTS idx_ip ON scan_results(ip);
         CREATE INDEX IF NOT EXISTS idx_domain ON scan_results(cert_domain);
         CREATE INDEX IF NOT EXISTS idx_geo ON scan_results(geo_code);
@@ -73,13 +72,6 @@ async fn main() {
     .execute(&db)
     .await
     .unwrap();
-
-    // Clean up duplicates before creating the unique index
-    let _ = sqlx::query("DELETE FROM scan_results WHERE id NOT IN (SELECT MAX(id) FROM scan_results GROUP BY ip, port)")
-        .execute(&db).await;
-    let _ = sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_port ON scan_results(ip, port)")
-        .execute(&db)
-        .await;
 
     let default_settings = vec![
         ("concurrency_limit", "50"),
@@ -117,6 +109,13 @@ async fn main() {
         .execute(&db)
         .await;
     let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN status TEXT DEFAULT 'COMPLETED'")
+        .execute(&db)
+        .await;
+
+    // Clean up duplicates after compatibility migrations and before creating the unique index.
+    let _ = sqlx::query("DELETE FROM scan_results WHERE id NOT IN (SELECT MAX(id) FROM scan_results GROUP BY ip, port)")
+        .execute(&db).await;
+    let _ = sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_port ON scan_results(ip, port)")
         .execute(&db)
         .await;
 

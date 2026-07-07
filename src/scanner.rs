@@ -183,9 +183,7 @@ pub async fn scan_tls(
         _ => return default_fail_result(ip, port, origin, geo_code),
     };
 
-    let server_name = ServerName::try_from(origin.clone())
-        .unwrap_or_else(|_| ServerName::try_from("localhost").unwrap())
-        .to_owned();
+    let server_name = server_name_for_origin(&origin, ip);
 
     let tls_future = tls_connector.connect(server_name, tcp_stream);
     let tls_stream = match timeout(Duration::from_secs(timeout_secs), tls_future).await {
@@ -260,5 +258,50 @@ pub async fn scan_tls(
         latency,
         cert_validity,
         feasible,
+    }
+}
+
+fn server_name_for_origin(origin: &str, ip: IpAddr) -> ServerName<'static> {
+    let normalized = normalize_server_name(origin);
+    ServerName::try_from(normalized).unwrap_or_else(|_| {
+        ServerName::try_from(ip.to_string()).expect("IP addresses should be valid server names")
+    })
+}
+
+fn normalize_server_name(origin: &str) -> String {
+    let mut host = origin.trim().trim_end_matches('.').to_string();
+
+    if let Some(rest) = host.strip_prefix('[')
+        && let Some(end) = rest.find(']')
+    {
+        return rest[..end].to_string();
+    }
+
+    if let Some((name, port)) = host.rsplit_once(':')
+        && !name.contains(':')
+        && port.parse::<u16>().is_ok()
+    {
+        host = name.to_string();
+    }
+
+    host
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_name_strips_port_from_domain_origin() {
+        let server_name = server_name_for_origin("example.com:8443", "192.0.2.1".parse().unwrap());
+
+        assert_eq!(server_name.to_str(), "example.com");
+    }
+
+    #[test]
+    fn server_name_falls_back_to_ip_for_invalid_origin() {
+        let server_name = server_name_for_origin("not a dns name", "192.0.2.1".parse().unwrap());
+
+        assert_eq!(server_name.to_str(), "192.0.2.1");
     }
 }
