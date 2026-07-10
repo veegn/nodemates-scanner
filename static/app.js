@@ -54,9 +54,15 @@ const translations = {
         historyEmptyTitle: "No scan history found",
         historyEmptyText: "Run a new scan to start building your history.",
         btnRefresh: "Refresh",
+        btnExportCsv: "Export CSV",
         btnCopy: "Copy",
         btnCopied: "Copied",
         btnDelete: "Delete",
+        filterDomain: "Domain",
+        filterGeo: "Geo",
+        filterAsn: "ASN",
+        filterPort: "Port",
+        filterLatency: "Max Latency",
         setConcurrency: "Concurrency Limit",
         setCooldown: "Cooldown (Days)",
         setIpv4: "IPv4 Max CIDR",
@@ -73,7 +79,21 @@ const translations = {
         radarBot: "Bot",
         radarUpdated: "Updated",
         radarTokenMissing: "Token not configured",
-        radarUnavailable: "Radar unavailable"
+        radarUnavailable: "Radar unavailable",
+        radarHttp: "HTTP",
+        radarRouting: "Routing",
+        radarAttacks: "Attacks",
+        radarDevice: "Device",
+        radarProtocol: "Protocol",
+        radarIpVersion: "IP Version",
+        radarTls: "TLS",
+        radarHijacks: "Hijacks",
+        radarLeaks: "Leaks",
+        radarRpki: "RPKI ROA",
+        radarL7: "L7",
+        radarL3: "L3",
+        radarVector: "Vector",
+        radarNoEvents: "No recent events"
     },
     zh: {
         pageTitle: "nodemates-scanner - 高级 TLS 节点嗅探",
@@ -130,9 +150,15 @@ const translations = {
         historyEmptyTitle: "暂无扫描历史",
         historyEmptyText: "去雷达扫描页运行一次扫描即可生成历史记录。",
         btnRefresh: "刷新",
+        btnExportCsv: "导出 CSV",
         btnCopy: "复制",
         btnCopied: "已复制",
         btnDelete: "删除",
+        filterDomain: "域名",
+        filterGeo: "地区",
+        filterAsn: "ASN",
+        filterPort: "端口",
+        filterLatency: "最高延迟",
         setConcurrency: "并发线程数限制",
         setCooldown: "扫描记录缓存期 (天)",
         setIpv4: "IPv4 最大 CIDR (如 24 代表 /24)",
@@ -149,7 +175,21 @@ const translations = {
         radarBot: "机器人",
         radarUpdated: "更新",
         radarTokenMissing: "未配置 Token",
-        radarUnavailable: "Radar 不可用"
+        radarUnavailable: "Radar 不可用",
+        radarHttp: "HTTP",
+        radarRouting: "路由",
+        radarAttacks: "攻击",
+        radarDevice: "设备",
+        radarProtocol: "协议",
+        radarIpVersion: "IP 版本",
+        radarTls: "TLS",
+        radarHijacks: "劫持",
+        radarLeaks: "泄漏",
+        radarRpki: "RPKI ROA",
+        radarL7: "L7",
+        radarL3: "L3",
+        radarVector: "类型",
+        radarNoEvents: "近期无事件"
     }
 };
 
@@ -212,7 +252,13 @@ const historySection = document.getElementById('history-section');
 const settingsSection = document.getElementById('settings-section');
 const historyAccordionContainer = document.getElementById('history-accordion-container');
 const refreshHistoryBtn = document.getElementById('refresh-history-btn');
+const exportResultsBtn = document.getElementById('export-results-btn');
 const historyEmpty = document.getElementById('history-empty');
+const historyFilterDomain = document.getElementById('history-filter-domain');
+const historyFilterGeo = document.getElementById('history-filter-geo');
+const historyFilterAsn = document.getElementById('history-filter-asn');
+const historyFilterPort = document.getElementById('history-filter-port');
+const historyFilterLatency = document.getElementById('history-filter-latency');
 const langToggle = document.getElementById('lang-toggle');
 const tabsContainer = document.querySelector('.glass-container > header > .tabs');
 const settingsBackBtn = document.getElementById('settings-back-btn');
@@ -413,6 +459,23 @@ function formatRadarUpdated(value) {
     });
 }
 
+function formatDistribution(items, maxItems = 2) {
+    if (!Array.isArray(items) || items.length === 0) return '-';
+    return items
+        .slice(0, maxItems)
+        .map((item) => `${formatRadarLabel(item.label)} ${formatPercent(item.value)}`)
+        .join(' · ');
+}
+
+function formatRadarLabel(label) {
+    return String(label || '-')
+        .replace(/^LIKELY_/, '')
+        .replace(/^HTTPv/, 'HTTP/')
+        .replace(/_/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 const radarBotSummaryCache = new Map();
 let activeAsnPopover = null;
 
@@ -459,6 +522,13 @@ function addPopoverLine(popover, label, value) {
     return { line, valueEl };
 }
 
+function addPopoverSection(popover, label) {
+    const section = document.createElement('div');
+    section.className = 'asn-popover-section';
+    section.textContent = label;
+    popover.appendChild(section);
+}
+
 async function getRadarBotSummary(asn) {
     if (radarBotSummaryCache.has(asn)) {
         return radarBotSummaryCache.get(asn);
@@ -498,6 +568,21 @@ function loadRadarBotSummary(popover, row, radarLine, humanLine, botLine, update
             setRadarLineValue(popover, humanLine, formatPercent(summary.human));
             setRadarLineValue(popover, botLine, formatPercent(summary.bot));
             setRadarLineValue(popover, updatedLine, formatRadarUpdated(summary.last_updated));
+            setRadarLineValue(popover, row._radarDeviceLine, formatDistribution(summary.device_type));
+            setRadarLineValue(popover, row._radarProtocolLine, formatDistribution(summary.http_protocol));
+            setRadarLineValue(popover, row._radarIpVersionLine, formatDistribution(summary.ip_version));
+            setRadarLineValue(popover, row._radarTlsLine, formatDistribution(summary.tls_version));
+
+            const bgp = summary.bgp || {};
+            setRadarLineValue(popover, row._radarHijacksLine, String(bgp.high_confidence_hijacks ?? bgp.hijack_events ?? 0));
+            setRadarLineValue(popover, row._radarLeaksLine, String(bgp.ongoing_route_leaks ?? bgp.route_leak_events ?? 0));
+            setRadarLineValue(popover, row._radarRpkiLine, bgp.rpki_roa_coverage == null ? '-' : formatPercent(bgp.rpki_roa_coverage));
+            setRadarLineValue(popover, row._radarRecentLine, bgp.recent_event || t.radarNoEvents);
+
+            const attacks = summary.attacks || {};
+            setRadarLineValue(popover, row._radarL7Line, formatDistribution(attacks.layer7_mitigation));
+            setRadarLineValue(popover, row._radarL3ProtocolLine, formatDistribution(attacks.layer3_protocol));
+            setRadarLineValue(popover, row._radarL3VectorLine, formatDistribution(attacks.layer3_vector));
         })
         .catch((error) => {
             const message = error.status === 503 ? t.radarTokenMissing : t.radarUnavailable;
@@ -505,6 +590,19 @@ function loadRadarBotSummary(popover, row, radarLine, humanLine, botLine, update
             setRadarLineValue(popover, humanLine, '-');
             setRadarLineValue(popover, botLine, '-');
             setRadarLineValue(popover, updatedLine, '-');
+            [
+                row._radarDeviceLine,
+                row._radarProtocolLine,
+                row._radarIpVersionLine,
+                row._radarTlsLine,
+                row._radarHijacksLine,
+                row._radarLeaksLine,
+                row._radarRpkiLine,
+                row._radarRecentLine,
+                row._radarL7Line,
+                row._radarL3ProtocolLine,
+                row._radarL3VectorLine,
+            ].forEach((line) => setRadarLineValue(popover, line, '-'));
         });
 }
 
@@ -523,6 +621,20 @@ function showAsnPopover(event, row) {
         const humanLine = addPopoverLine(popover, t.radarHuman, '-');
         const botLine = addPopoverLine(popover, t.radarBot, '-');
         const updatedLine = addPopoverLine(popover, t.radarUpdated, '-');
+        addPopoverSection(popover, t.radarHttp);
+        row._radarDeviceLine = addPopoverLine(popover, t.radarDevice, '-');
+        row._radarProtocolLine = addPopoverLine(popover, t.radarProtocol, '-');
+        row._radarIpVersionLine = addPopoverLine(popover, t.radarIpVersion, '-');
+        row._radarTlsLine = addPopoverLine(popover, t.radarTls, '-');
+        addPopoverSection(popover, t.radarRouting);
+        row._radarHijacksLine = addPopoverLine(popover, t.radarHijacks, '-');
+        row._radarLeaksLine = addPopoverLine(popover, t.radarLeaks, '-');
+        row._radarRpkiLine = addPopoverLine(popover, t.radarRpki, '-');
+        row._radarRecentLine = addPopoverLine(popover, t.radarUpdated, '-');
+        addPopoverSection(popover, t.radarAttacks);
+        row._radarL7Line = addPopoverLine(popover, t.radarL7, '-');
+        row._radarL3ProtocolLine = addPopoverLine(popover, `${t.radarL3} ${t.radarProtocol}`, '-');
+        row._radarL3VectorLine = addPopoverLine(popover, `${t.radarL3} ${t.radarVector}`, '-');
         loadRadarBotSummary(popover, row, radarLine, humanLine, botLine, updatedLine);
     }
 
@@ -799,6 +911,28 @@ function renderTaskState() {
     taskCurrent.textContent = taskState.current || t.taskWaiting;
 }
 
+function appendQueryValue(params, key, value) {
+    const text = String(value || '').trim();
+    if (text) params.set(key, text);
+}
+
+function getHistoryResultParams(historyId = null) {
+    const params = new URLSearchParams();
+    if (historyId !== null) params.set('history_id', historyId);
+    appendQueryValue(params, 'domain', historyFilterDomain?.value);
+    appendQueryValue(params, 'geo_code', historyFilterGeo?.value.toUpperCase());
+    appendQueryValue(params, 'asn', historyFilterAsn?.value);
+    appendQueryValue(params, 'port', historyFilterPort?.value);
+    appendQueryValue(params, 'latency_max', historyFilterLatency?.value);
+    params.set('limit', '1000');
+    return params;
+}
+
+function buildResultsUrl(path, historyId = null) {
+    const params = getHistoryResultParams(historyId);
+    return `${path}?${params.toString()}`;
+}
+
 async function fetchHistoryTasks() {
     refreshHistoryBtn.classList.add('loading');
     try {
@@ -822,7 +956,14 @@ async function fetchHistoryTasks() {
             const scannedAtText = currentLang === 'zh' ? '扫描时间' : 'Scanned At';
             const statusText = currentLang === 'zh' ? '状态' : 'Status';
             const completedText = currentLang === 'zh' ? '完成进度' : 'Completed';
-            targetInfo.innerHTML = `<strong>${task.target}</strong><span class="accordion-meta">${completedText}: ${task.completed_tasks} / ${task.total_tasks} | ${statusText}: ${task.status} | ${scannedAtText}: ${localScannedAt}</span>`;
+
+            const targetStrong = document.createElement('strong');
+            targetStrong.textContent = task.target;
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'accordion-meta';
+            metaSpan.textContent = `${completedText}: ${task.completed_tasks} / ${task.total_tasks} | ${statusText}: ${task.status} | ${scannedAtText}: ${localScannedAt}`;
+            targetInfo.appendChild(targetStrong);
+            targetInfo.appendChild(metaSpan);
             
             const taskActionGroup = document.createElement('div');
             const taskDeleteBtn = document.createElement('button');
@@ -871,7 +1012,7 @@ async function fetchHistoryTasks() {
                     if (content.innerHTML === '') {
                         content.innerHTML = '<div class="spinner"></div>';
                         try {
-                            const res = await fetch(`/results?history_id=${task.id}`);
+                            const res = await fetch(buildResultsUrl('/results', task.id));
                             if (!res.ok) throw new Error('Failed to fetch results');
                             const resultsData = await res.json();
                             renderTaskResults(content, resultsData);
@@ -967,6 +1108,29 @@ function renderTaskResults(container, data) {
 
 refreshHistoryBtn.addEventListener('click', fetchHistoryTasks);
 historyAccordionContainer.addEventListener('click', handleHistoryResultAction);
+
+const filterInputs = [
+    historyFilterDomain,
+    historyFilterGeo,
+    historyFilterAsn,
+    historyFilterPort,
+    historyFilterLatency,
+].filter(Boolean);
+let filterRefreshTimer = null;
+filterInputs.forEach((input) => {
+    input.addEventListener('input', () => {
+        if (filterRefreshTimer) clearTimeout(filterRefreshTimer);
+        filterRefreshTimer = setTimeout(() => {
+            if (historySection.style.display === 'block') fetchHistoryTasks();
+        }, 300);
+    });
+});
+
+if (exportResultsBtn) {
+    exportResultsBtn.addEventListener('click', () => {
+        window.location.href = buildResultsUrl('/results/export.csv');
+    });
+}
 
 async function handleHistoryResultAction(e) {
     const copyBtn = e.target.closest('.copy-btn');
@@ -1120,6 +1284,17 @@ form.addEventListener('submit', async (e) => {
             return;
         }
 
+        if (result.type === 'error') {
+            const message = result.message || t.taskFailed;
+            showToast(message, 'error');
+            taskState.status = 'failed';
+            taskState.current = message;
+            setTaskTimer(false);
+            renderTaskState();
+            resetButton();
+            return;
+        }
+
         if (result.type === 'start') {
             totalTasks = result.total;
             if (result.target) taskState.target = result.target;
@@ -1164,6 +1339,11 @@ form.addEventListener('submit', async (e) => {
             td.textContent = result.message;
             tr.appendChild(td);
             resultsBody.insertBefore(tr, resultsBody.firstChild);
+            return;
+        }
+
+        if (result.type === 'result') {
+            addResultRow(result.result);
             return;
         }
 
@@ -1216,7 +1396,7 @@ function addResultRow(result) {
         current: formatTemplate(t.taskCurrent, { ip: result.ip, port: result.port }),
     });
 
-    if (!result.feasible && !result.cert_domain && !result.asn_number && !result.asn_org) {
+    if (!result.feasible && !result.cert_domain && !result.asn_number && !result.asn_org && !result.failure_reason) {
         return;
     }
 
@@ -1230,7 +1410,7 @@ function addResultRow(result) {
     appendTextCell(tr, String(result.port));
     appendLatencyCell(tr, result.latency);
     appendTextCell(tr, result.tls_version);
-    appendDomainCell(tr, result.cert_domain, result.cert_issuer, result.asn_org);
+    appendDomainCell(tr, result.cert_domain || result.failure_reason, result.cert_issuer, result.asn_org);
     appendTextCell(tr, result.cert_validity);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);

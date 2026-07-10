@@ -187,7 +187,33 @@
                     <span class="task-eyebrow" data-i18n="historyEyebrow">Scan History</span>
                     <h2 data-i18n="historyTitle">Past Scans</h2>
                 </div>
-                <button id="refresh-history-btn" class="secondary-btn" data-i18n="btnRefresh">Refresh</button>
+                <div class="history-actions">
+                    <button id="export-results-btn" class="secondary-btn" data-i18n="btnExportCsv">Export CSV</button>
+                    <button id="refresh-history-btn" class="secondary-btn" data-i18n="btnRefresh">Refresh</button>
+                </div>
+            </div>
+
+            <div class="library-filters">
+                <div class="input-group">
+                    <label for="history-filter-domain" data-i18n="filterDomain">Domain</label>
+                    <input type="text" id="history-filter-domain" autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label for="history-filter-geo" data-i18n="filterGeo">Geo</label>
+                    <input type="text" id="history-filter-geo" autocomplete="off" maxlength="2">
+                </div>
+                <div class="input-group">
+                    <label for="history-filter-asn" data-i18n="filterAsn">ASN</label>
+                    <input type="number" id="history-filter-asn" autocomplete="off" min="1">
+                </div>
+                <div class="input-group">
+                    <label for="history-filter-port" data-i18n="filterPort">Port</label>
+                    <input type="number" id="history-filter-port" autocomplete="off" min="1" max="65535">
+                </div>
+                <div class="input-group">
+                    <label for="history-filter-latency" data-i18n="filterLatency">Max Latency</label>
+                    <input type="number" id="history-filter-latency" autocomplete="off" min="1">
+                </div>
             </div>
             
             <div id="history-empty" class="empty-state" style="display: none;">

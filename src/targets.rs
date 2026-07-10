@@ -50,10 +50,18 @@ fn clean_target(target: &str) -> String {
     } else if let Some(rest) = clean_target.strip_prefix("https://") {
         clean_target = rest.to_string();
     }
+    if let Some((_, rest)) = clean_target.split_once('@') {
+        clean_target = rest.to_string();
+    }
+    if let Some(rest) = clean_target.strip_prefix('[')
+        && let Some(end) = rest.find(']')
+    {
+        return rest[..end].to_string();
+    }
     if IpNet::from_str(&clean_target).is_ok() {
         return clean_target;
     }
-    if let Some(idx) = clean_target.find('/') {
+    if let Some(idx) = clean_target.find(['/', '?', '#']) {
         clean_target = clean_target[..idx].to_string();
     }
     clean_target
@@ -199,5 +207,17 @@ mod tests {
     fn domain_origin_strips_port_for_sni() {
         assert_eq!(normalize_domain_origin("example.com:8443"), "example.com");
         assert_eq!(normalize_domain_origin("example.com"), "example.com");
+    }
+
+    #[test]
+    fn clean_target_strips_url_noise() {
+        assert_eq!(
+            clean_target("https://user@example.com:8443/path?a=b#c"),
+            "example.com:8443"
+        );
+        assert_eq!(
+            clean_target("http://[2001:4860::8888]:443/dns-query"),
+            "2001:4860::8888"
+        );
     }
 }

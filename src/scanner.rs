@@ -135,6 +135,7 @@ pub fn default_fail_result(
     geo_code: String,
     asn_number: u32,
     asn_org: String,
+    failure_reason: impl Into<String>,
 ) -> ScanResult {
     ScanResult {
         ip: ip.to_string(),
@@ -152,6 +153,7 @@ pub fn default_fail_result(
         asn_org,
         latency: 0,
         cert_validity: "".into(),
+        failure_reason: failure_reason.into(),
         feasible: false,
     }
 }
@@ -193,7 +195,17 @@ pub async fn scan_tls(
     let connect_future = TcpStream::connect(addr);
     let tcp_stream = match timeout(Duration::from_secs(timeout_secs), connect_future).await {
         Ok(Ok(s)) => s,
-        _ => return default_fail_result(ip, port, origin, geo_code, asn_number, asn_org),
+        _ => {
+            return default_fail_result(
+                ip,
+                port,
+                origin,
+                geo_code,
+                asn_number,
+                asn_org,
+                "tcp_connect_failed_or_timeout",
+            );
+        }
     };
 
     let server_name = server_name_for_origin(&origin, ip);
@@ -201,7 +213,17 @@ pub async fn scan_tls(
     let tls_future = tls_connector.connect(server_name, tcp_stream);
     let tls_stream = match timeout(Duration::from_secs(timeout_secs), tls_future).await {
         Ok(Ok(s)) => s,
-        _ => return default_fail_result(ip, port, origin, geo_code, asn_number, asn_org),
+        _ => {
+            return default_fail_result(
+                ip,
+                port,
+                origin,
+                geo_code,
+                asn_number,
+                asn_org,
+                "tls_handshake_failed_or_timeout",
+            );
+        }
     };
 
     let latency = start_time.elapsed().as_millis() as u32;
@@ -254,6 +276,17 @@ pub async fn scan_tls(
         && alpn == "h2"
         && !cert_domain.is_empty()
         && !cert_issuer.is_empty();
+    let failure_reason = if feasible {
+        String::new()
+    } else if tls_version != "TLS 1.3" {
+        format!("unsupported_tls_version:{}", tls_version)
+    } else if alpn != "h2" {
+        format!("alpn_mismatch:{}", alpn)
+    } else if cert_domain.is_empty() || cert_issuer.is_empty() {
+        "certificate_metadata_missing".to_string()
+    } else {
+        "rule_mismatch".to_string()
+    };
 
     ScanResult {
         ip: ip.to_string(),
@@ -271,6 +304,7 @@ pub async fn scan_tls(
         asn_org,
         latency,
         cert_validity,
+        failure_reason,
         feasible,
     }
 }

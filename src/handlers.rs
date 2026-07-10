@@ -3,18 +3,18 @@ use axum::{
         Json, Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::StatusCode,
-    response::IntoResponse,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use futures::stream::StreamExt;
 use maxminddb::Reader;
 use rustls::ClientConfig;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio_rustls::TlsConnector;
 
 use crate::models::{
-    AppState, DbScanResult, DeleteResultQuery, RadarBotClassSummary, ResultsQuery, ScanRequest,
-    SystemSettings,
+    AppState, DbScanResult, DeleteResultQuery, HealthStatus, RadarAsnSummary, RadarAttackSummary,
+    RadarBgpRiskSummary, RadarDimensionShare, ResultsQuery, ScanRequest, SystemSettings,
 };
 use crate::scan_events::{ScanEvent, ScanMode, ScanStatus};
 use crate::scanner::{DummyVerifier, scan_tls};
@@ -87,6 +87,23 @@ pub async fn put_settings_handler(
     Ok(StatusCode::OK)
 }
 
+pub async fn health_handler(State(state): State<AppState>) -> Json<HealthStatus> {
+    let database = sqlx::query("SELECT 1").execute(&state.db).await.is_ok();
+    let country_db = std::path::Path::new(&state.config.country_db_path).exists();
+    let asn_db = std::path::Path::new(&state.config.asn_db_path).exists();
+    let radar_token_configured = std::env::var("CLOUDFLARE_API_TOKEN").is_ok();
+    let status = if database { "ok" } else { "degraded" }.to_string();
+
+    Json(HealthStatus {
+        status,
+        database,
+        country_db,
+        asn_db,
+        radar_token_configured,
+        radar_date_range: state.config.radar_date_range.clone(),
+    })
+}
+
 pub async fn ws_scan_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -96,6 +113,16 @@ pub async fn ws_scan_handler(
 
 async fn send_event(socket: &mut WebSocket, event: ScanEvent) -> bool {
     socket.send(Message::Text(event.into_text())).await.is_ok()
+}
+
+async fn send_error(socket: &mut WebSocket, message: impl Into<String>) {
+    let _ = send_event(
+        socket,
+        ScanEvent::Error {
+            message: message.into(),
+        },
+    )
+    .await;
 }
 
 async fn check_scan_history(
@@ -134,6 +161,16 @@ async fn check_scan_history(
     Ok(0)
 }
 
+async fn checkpoint_scan(db: &sqlx::SqlitePool, history_id: i64, completed_tasks: usize) {
+    let _ = sqlx::query(
+        "UPDATE scan_history SET completed_tasks = ?, status = 'IN_PROGRESS' WHERE id = ?",
+    )
+    .bind(completed_tasks as i64)
+    .bind(history_id)
+    .execute(db)
+    .await;
+}
+
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let settings = load_settings(&state.db).await;
 
@@ -144,14 +181,15 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 
     let payload: ScanRequest = match serde_json::from_str(&msg) {
         Ok(p) => p,
-        Err(_) => return,
+        Err(_) => {
+            send_error(&mut socket, "Error: Invalid scan request").await;
+            return;
+        }
     };
 
     let target = payload.target.trim().to_string();
     if target.is_empty() {
-        let _ = socket
-            .send(Message::Text("Error: Target is required".into()))
-            .await;
+        send_error(&mut socket, "Error: Target is required").await;
         return;
     }
 
@@ -159,25 +197,25 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         match normalize_requested_ports(payload.ports.unwrap_or_else(|| vec![443]), &settings) {
             Ok(ports) => ports,
             Err(e) => {
-                let _ = socket.send(Message::Text(e)).await;
+                send_error(&mut socket, e).await;
                 return;
             }
         };
 
     let timeout_secs = payload.timeout.unwrap_or(10);
     if !(1..=60).contains(&timeout_secs) {
-        let _ = socket
-            .send(Message::Text(
-                "Error: Timeout must be between 1 and 60 seconds".into(),
-            ))
-            .await;
+        send_error(
+            &mut socket,
+            "Error: Timeout must be between 1 and 60 seconds",
+        )
+        .await;
         return;
     }
 
     let resolved = match resolve_target(&target, &settings).await {
         Ok(res) => res,
         Err(e) => {
-            let _ = socket.send(Message::Text(e)).await;
+            send_error(&mut socket, e).await;
             return;
         }
     };
@@ -195,7 +233,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 use_cache = true;
                 0
             } else {
-                let _ = socket.send(Message::Text(e)).await;
+                send_error(&mut socket, e).await;
                 return;
             }
         }
@@ -276,6 +314,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         asn_org: r.8,
                         latency: r.10 as u32,
                         cert_validity: r.11,
+                        failure_reason: String::new(),
                         feasible: r.12,
                     }
                 } else {
@@ -286,11 +325,20 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         "N/A".into(),
                         0,
                         "".into(),
+                        "cache_miss",
                     )
                 };
 
-                let json = serde_json::to_string(&res).unwrap();
-                if socket.send(Message::Text(json)).await.is_err() {
+                let progress_ip = res.ip.clone();
+                let progress_port = res.port;
+                if !send_event(
+                    &mut socket,
+                    ScanEvent::Result {
+                        result: Box::new(res),
+                    },
+                )
+                .await
+                {
                     return;
                 }
                 completed_tasks += 1;
@@ -300,8 +348,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         mode: ScanMode::Cache,
                         completed: completed_tasks,
                         total: total_tasks_count,
-                        ip: ip.to_string(),
-                        port: *port,
+                        ip: progress_ip,
+                        port: progress_port,
                     },
                 )
                 .await;
@@ -326,8 +374,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     let tls_connector = TlsConnector::from(Arc::new(config));
 
-    let geo_reader = Reader::open_readfile("Country.mmdb").ok().map(Arc::new);
-    let asn_reader = Reader::open_readfile("GeoLite2-ASN.mmdb")
+    let geo_reader = Reader::open_readfile(&state.config.country_db_path)
+        .ok()
+        .map(Arc::new);
+    let asn_reader = Reader::open_readfile(&state.config.asn_db_path)
         .ok()
         .map(Arc::new);
 
@@ -354,10 +404,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     }
 
-    let iter = ips_to_scan.into_iter().zip(origins).flat_map(|(ip, origin)| {
-        let ports = ports.clone();
-        ports.into_iter().map(move |p| (ip, origin.clone(), p))
-    }).map(|(ip, origin, port)| {
+    let iter = ips_to_scan
+        .into_iter()
+        .zip(origins)
+        .flat_map(|(ip, origin)| {
+            let ports = ports.clone();
+            ports.into_iter().map(move |p| (ip, origin.clone(), p))
+        })
+        .map(|(ip, origin, port)| {
         let tls = tls_connector.clone();
         let geo = geo_reader.clone();
         let asn = asn_reader.clone();
@@ -394,7 +448,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     });
 
-    let mut stream = futures::stream::iter(iter.skip(skip_tasks)).buffered(concurrency_limit);
+    let mut stream =
+        futures::stream::iter(iter.skip(skip_tasks)).buffer_unordered(concurrency_limit);
     let mut completed_tasks = skip_tasks;
     let mut broken = false;
 
@@ -403,8 +458,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             res_opt = stream.next() => {
                 if let Some(res) = res_opt {
                     completed_tasks += 1;
-                    let json = serde_json::to_string(&res).unwrap();
-                    if socket.send(Message::Text(json)).await.is_err() {
+                    let progress_ip = res.ip.clone();
+                    let progress_port = res.port;
+                    if !send_event(
+                        &mut socket,
+                        ScanEvent::Result {
+                            result: Box::new(res),
+                        },
+                    )
+                    .await
+                    {
                         broken = true;
                         break;
                     }
@@ -414,11 +477,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             mode: ScanMode::Scan,
                             completed: completed_tasks,
                             total: total_tasks_count,
-                            ip: res.ip,
-                            port: res.port,
+                            ip: progress_ip,
+                            port: progress_port,
                         },
                     )
                     .await;
+                    if history_id > 0
+                        && completed_tasks % state.config.scan_checkpoint_interval == 0
+                    {
+                        checkpoint_scan(&state.db, history_id, completed_tasks).await;
+                    }
                 } else {
                     break;
                 }
@@ -532,10 +600,15 @@ pub async fn get_history_tasks_handler(
 }
 
 pub async fn get_asn_bot_summary_handler(
+    State(state): State<AppState>,
     Path(asn): Path<u32>,
-) -> Result<Json<RadarBotClassSummary>, (StatusCode, String)> {
+) -> Result<Json<RadarAsnSummary>, (StatusCode, String)> {
     if asn == 0 {
         return Err((StatusCode::BAD_REQUEST, "ASN must be greater than 0".into()));
+    }
+
+    if let Some(summary) = get_cached_radar_summary(&state, asn).await {
+        return Ok(Json(summary));
     }
 
     let token = std::env::var("CLOUDFLARE_API_TOKEN").map_err(|_| {
@@ -545,14 +618,207 @@ pub async fn get_asn_bot_summary_handler(
         )
     })?;
 
-    let date_range = "7d";
-    let url = format!(
-        "https://api.cloudflare.com/client/v4/radar/http/summary/bot_class?asn={}&dateRange={}&format=json",
-        asn, date_range
-    );
+    let date_range = state.config.radar_date_range.clone();
+    let base_params = [
+        ("asn", asn.to_string()),
+        ("dateRange", date_range.clone()),
+        ("format", "json".to_string()),
+    ];
 
-    let response = reqwest::Client::new()
-        .get(&url)
+    let bot_json = radar_get_json(
+        &state,
+        &token,
+        "/radar/http/summary/BOT_CLASS",
+        &base_params,
+    )
+    .await?;
+    let bot_class = extract_radar_distribution(&bot_json);
+    let human = find_distribution_value(&bot_class, &["human"]).ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar response is missing human traffic data".to_string(),
+        )
+    })?;
+    let bot = find_distribution_value(&bot_class, &["automated", "bot"]).ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar response is missing bot traffic data".to_string(),
+        )
+    })?;
+    let last_updated = radar_last_updated(&bot_json);
+
+    let device_type =
+        radar_dimension_or_empty(&state, &token, asn, &date_range, "DEVICE_TYPE").await;
+    let http_protocol =
+        radar_dimension_or_empty(&state, &token, asn, &date_range, "HTTP_PROTOCOL").await;
+    let ip_version = radar_dimension_or_empty(&state, &token, asn, &date_range, "IP_VERSION").await;
+    let tls_version =
+        radar_dimension_or_empty(&state, &token, asn, &date_range, "TLS_VERSION").await;
+    let bgp = radar_bgp_risk_or_empty(&state, &token, asn, &date_range).await;
+    let attacks = radar_attacks_or_empty(&state, &token, asn, &date_range).await;
+
+    let summary = RadarAsnSummary {
+        asn,
+        human,
+        bot,
+        date_range,
+        last_updated,
+        radar_url: format!("https://radar.cloudflare.com/bots/as{}", asn),
+        device_type,
+        http_protocol,
+        ip_version,
+        tls_version,
+        bgp,
+        attacks,
+    };
+
+    set_cached_radar_summary(&state, summary.clone()).await;
+
+    Ok(Json(summary))
+}
+
+fn parse_radar_percentage(value: Option<&serde_json::Value>) -> Option<f64> {
+    match value? {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+async fn radar_dimension_or_empty(
+    state: &AppState,
+    token: &str,
+    asn: u32,
+    date_range: &str,
+    dimension: &str,
+) -> Vec<RadarDimensionShare> {
+    let params = [
+        ("asn", asn.to_string()),
+        ("dateRange", date_range.to_string()),
+        ("format", "json".to_string()),
+        ("limitPerGroup", "6".to_string()),
+    ];
+    let path = format!("/radar/http/summary/{dimension}");
+    match radar_get_json(state, token, &path, &params).await {
+        Ok(json) => extract_radar_distribution(&json),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn radar_attacks_or_empty(
+    state: &AppState,
+    token: &str,
+    asn: u32,
+    date_range: &str,
+) -> RadarAttackSummary {
+    let params = [
+        ("asn", asn.to_string()),
+        ("dateRange", date_range.to_string()),
+        ("format", "json".to_string()),
+        ("limitPerGroup", "6".to_string()),
+    ];
+
+    let layer7_mitigation = match radar_get_json(
+        state,
+        token,
+        "/radar/attacks/layer7/summary/MITIGATION_PRODUCT",
+        &params,
+    )
+    .await
+    {
+        Ok(json) => extract_radar_distribution(&json),
+        Err(_) => Vec::new(),
+    };
+    let layer3_protocol = match radar_get_json(
+        state,
+        token,
+        "/radar/attacks/layer3/summary/PROTOCOL",
+        &params,
+    )
+    .await
+    {
+        Ok(json) => extract_radar_distribution(&json),
+        Err(_) => Vec::new(),
+    };
+    let layer3_vector = match radar_get_json(
+        state,
+        token,
+        "/radar/attacks/layer3/summary/VECTOR",
+        &params,
+    )
+    .await
+    {
+        Ok(json) => extract_radar_distribution(&json),
+        Err(_) => Vec::new(),
+    };
+
+    RadarAttackSummary {
+        layer7_mitigation,
+        layer3_protocol,
+        layer3_vector,
+    }
+}
+
+async fn radar_bgp_risk_or_empty(
+    state: &AppState,
+    token: &str,
+    asn: u32,
+    date_range: &str,
+) -> RadarBgpRiskSummary {
+    let anomaly_params = [
+        ("invlovedAsn", asn.to_string()),
+        ("format", "json".to_string()),
+        ("per_page", "10".to_string()),
+        ("minConfidence", "8".to_string()),
+    ];
+    let rpki_params = [
+        ("asn", asn.to_string()),
+        ("dateRange", date_range.to_string()),
+        ("format", "json".to_string()),
+    ];
+
+    let hijacks = radar_get_json(state, token, "/radar/bgp/hijacks/events", &anomaly_params)
+        .await
+        .ok();
+    let leaks = radar_get_json(state, token, "/radar/bgp/leaks/events", &anomaly_params)
+        .await
+        .ok();
+    let rpki = radar_get_json(
+        state,
+        token,
+        "/radar/bgp/rpki/roas/timeseries",
+        &rpki_params,
+    )
+    .await
+    .ok();
+
+    let hijack_events = radar_event_count(hijacks.as_ref());
+    let high_confidence_hijacks = radar_high_confidence_hijacks(hijacks.as_ref());
+    let route_leak_events = radar_event_count(leaks.as_ref());
+    let ongoing_route_leaks = radar_ongoing_route_leaks(leaks.as_ref());
+    let recent_event = radar_recent_bgp_event(hijacks.as_ref(), leaks.as_ref());
+    let rpki_roa_coverage = rpki.as_ref().and_then(radar_latest_timeseries_value);
+
+    RadarBgpRiskSummary {
+        hijack_events,
+        high_confidence_hijacks,
+        route_leak_events,
+        ongoing_route_leaks,
+        rpki_roa_coverage,
+        recent_event,
+    }
+}
+
+async fn radar_get_json(
+    state: &AppState,
+    token: &str,
+    path: &str,
+    params: &[(&str, String)],
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let url = radar_url(path, params);
+    let response = state
+        .http_client
+        .get(url)
         .bearer_auth(token)
         .send()
         .await
@@ -596,52 +862,275 @@ pub async fn get_asn_bot_summary_handler(
         ));
     }
 
-    let summary = json.pointer("/result/summary_0").ok_or_else(|| {
-        (
-            StatusCode::BAD_GATEWAY,
-            "Cloudflare Radar response is missing summary data".to_string(),
-        )
-    })?;
-    let human = parse_radar_percentage(summary.get("human")).ok_or_else(|| {
-        (
-            StatusCode::BAD_GATEWAY,
-            "Cloudflare Radar response is missing human traffic data".to_string(),
-        )
-    })?;
-    let bot = parse_radar_percentage(summary.get("bot")).ok_or_else(|| {
-        (
-            StatusCode::BAD_GATEWAY,
-            "Cloudflare Radar response is missing bot traffic data".to_string(),
-        )
-    })?;
-    let last_updated = json
-        .pointer("/result/meta/lastUpdated")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    Ok(Json(RadarBotClassSummary {
-        asn,
-        human,
-        bot,
-        date_range: date_range.into(),
-        last_updated,
-        radar_url: format!("https://radar.cloudflare.com/bots/as{}", asn),
-    }))
+    Ok(json)
 }
 
-fn parse_radar_percentage(value: Option<&serde_json::Value>) -> Option<f64> {
-    match value? {
-        serde_json::Value::Number(number) => number.as_f64(),
-        serde_json::Value::String(text) => text.parse::<f64>().ok(),
-        _ => None,
+fn radar_url(path: &str, params: &[(&str, String)]) -> String {
+    let mut url = format!("https://api.cloudflare.com/client/v4{path}");
+    if !params.is_empty() {
+        url.push('?');
+        url.push_str(
+            &params
+                .iter()
+                .map(|(key, value)| format!("{key}={}", radar_query_escape(value)))
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
     }
+    url
+}
+
+fn radar_query_escape(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
+}
+
+fn extract_radar_distribution(json: &serde_json::Value) -> Vec<RadarDimensionShare> {
+    let Some(result) = json.get("result").and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+
+    let summary = result
+        .get("summary_0")
+        .and_then(serde_json::Value::as_object)
+        .or_else(|| {
+            result.iter().find_map(|(key, value)| {
+                if key == "meta" || key == "asn_info" || key == "events" {
+                    return None;
+                }
+                let object = value.as_object()?;
+                if object
+                    .values()
+                    .any(|item| parse_radar_percentage(Some(item)).is_some())
+                {
+                    Some(object)
+                } else {
+                    None
+                }
+            })
+        });
+
+    let mut values = summary
+        .into_iter()
+        .flat_map(|object| object.iter())
+        .filter_map(|(label, value)| {
+            Some(RadarDimensionShare {
+                label: label.to_string(),
+                value: parse_radar_percentage(Some(value))?,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    values.sort_by(|a, b| {
+        b.value
+            .partial_cmp(&a.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    values.truncate(6);
+    values
+}
+
+fn find_distribution_value(distribution: &[RadarDimensionShare], needles: &[&str]) -> Option<f64> {
+    distribution.iter().find_map(|item| {
+        let label = item.label.to_lowercase();
+        if needles.iter().any(|needle| label.contains(needle)) {
+            Some(item.value)
+        } else {
+            None
+        }
+    })
+}
+
+fn radar_last_updated(json: &serde_json::Value) -> String {
+    json.pointer("/result/meta/lastUpdated")
+        .or_else(|| json.pointer("/result/meta/dataTime"))
+        .or_else(|| json.pointer("/result/meta/queryTime"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn radar_event_count(json: Option<&serde_json::Value>) -> usize {
+    json.and_then(|value| value.pointer("/result/events"))
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len)
+}
+
+fn radar_high_confidence_hijacks(json: Option<&serde_json::Value>) -> usize {
+    json.and_then(|value| value.pointer("/result/events"))
+        .and_then(serde_json::Value::as_array)
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| {
+                    event
+                        .get("confidence_score")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0)
+                        >= 8.0
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn radar_ongoing_route_leaks(json: Option<&serde_json::Value>) -> usize {
+    json.and_then(|value| value.pointer("/result/events"))
+        .and_then(serde_json::Value::as_array)
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| {
+                    event
+                        .get("finished")
+                        .and_then(serde_json::Value::as_bool)
+                        .is_some_and(|finished| !finished)
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn radar_recent_bgp_event(
+    hijacks: Option<&serde_json::Value>,
+    leaks: Option<&serde_json::Value>,
+) -> String {
+    let hijack_ts = radar_first_event_timestamp(hijacks, &["max_hijack_ts", "max_msg_ts"]);
+    let leak_ts = radar_first_event_timestamp(leaks, &["max_ts", "detected_ts"]);
+
+    match (hijack_ts, leak_ts) {
+        (Some(hijack), Some(leak)) => {
+            if hijack >= leak {
+                format!("hijack {}", hijack)
+            } else {
+                format!("route leak {}", leak)
+            }
+        }
+        (Some(hijack), None) => format!("hijack {}", hijack),
+        (None, Some(leak)) => format!("route leak {}", leak),
+        (None, None) => String::new(),
+    }
+}
+
+fn radar_first_event_timestamp(
+    json: Option<&serde_json::Value>,
+    fields: &[&str],
+) -> Option<String> {
+    let first = json
+        .and_then(|value| value.pointer("/result/events"))
+        .and_then(serde_json::Value::as_array)?
+        .first()?;
+
+    fields.iter().find_map(|field| {
+        first
+            .get(*field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    })
+}
+
+fn radar_latest_timeseries_value(json: &serde_json::Value) -> Option<f64> {
+    let values = json
+        .pointer("/result/serie_0/values")
+        .and_then(serde_json::Value::as_array)?;
+    values
+        .iter()
+        .rev()
+        .find_map(|value| parse_radar_percentage(Some(value)))
+}
+
+async fn get_cached_radar_summary(state: &AppState, asn: u32) -> Option<RadarAsnSummary> {
+    let now = std::time::Instant::now();
+    let cache = state.radar_cache.read().await;
+    let entry = cache.get(&asn)?;
+    if entry.expires_at > now {
+        Some(entry.summary.clone())
+    } else {
+        None
+    }
+}
+
+async fn set_cached_radar_summary(state: &AppState, summary: RadarAsnSummary) {
+    let expires_at =
+        std::time::Instant::now() + Duration::from_secs(state.config.radar_cache_ttl_secs);
+    let mut cache = state.radar_cache.write().await;
+    cache.insert(
+        summary.asn,
+        crate::models::RadarCacheEntry {
+            summary,
+            expires_at,
+        },
+    );
 }
 
 pub async fn get_results_handler(
     State(state): State<AppState>,
     Query(query): Query<ResultsQuery>,
 ) -> Result<Json<Vec<DbScanResult>>, (StatusCode, String)> {
+    let results = query_results(&state.db, query).await?;
+    Ok(Json(results))
+}
+
+pub async fn export_results_csv_handler(
+    State(state): State<AppState>,
+    Query(query): Query<ResultsQuery>,
+) -> Result<Response, (StatusCode, String)> {
+    let results = query_results(&state.db, query).await?;
+    let mut csv = String::from(
+        "ip,port,origin,tls_version,alpn,cert_domain,cert_issuer,cert_validity,geo_code,cert_type,asn_number,asn_org,latency,scanned_at\n",
+    );
+
+    for row in results {
+        let fields = [
+            row.ip,
+            row.port.to_string(),
+            row.origin,
+            row.tls_version,
+            row.alpn,
+            row.cert_domain,
+            row.cert_issuer,
+            row.cert_validity,
+            row.geo_code,
+            row.cert_type,
+            row.asn_number.to_string(),
+            row.asn_org,
+            row.latency.to_string(),
+            row.scanned_at,
+        ];
+        csv.push_str(
+            &fields
+                .iter()
+                .map(|field| csv_escape(field))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        csv.push('\n');
+    }
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"nodemates-results.csv\"",
+            ),
+        ],
+        csv,
+    )
+        .into_response())
+}
+
+async fn query_results(
+    db: &sqlx::SqlitePool,
+    query: ResultsQuery,
+) -> Result<Vec<DbScanResult>, (StatusCode, String)> {
     let mut query_builder = sqlx::QueryBuilder::new(
         "SELECT r.ip, r.port, r.origin, r.tls_version, r.alpn, r.cert_domain, r.cert_issuer, r.geo_code, r.cert_type, r.scanned_at, r.asn_org, r.asn_number, r.latency, r.cert_validity FROM scan_results r",
     );
@@ -656,18 +1145,48 @@ pub async fn get_results_handler(
     }
 
     if let Some(geo) = query.geo_code {
-        query_builder.push(" AND geo_code = ");
+        query_builder.push(" AND r.geo_code = ");
         query_builder.push_bind(geo);
     }
 
     if let Some(domain) = query.domain {
-        query_builder.push(" AND cert_domain LIKE ");
+        query_builder.push(" AND r.cert_domain LIKE ");
         query_builder.push_bind(format!("%{}%", domain));
     }
 
     if let Some(port) = query.port {
-        query_builder.push(" AND port = ");
+        query_builder.push(" AND r.port = ");
         query_builder.push_bind(port);
+    }
+
+    if let Some(asn) = query.asn {
+        query_builder.push(" AND r.asn_number = ");
+        query_builder.push_bind(asn);
+    }
+
+    if let Some(tls_version) = query.tls_version {
+        query_builder.push(" AND r.tls_version = ");
+        query_builder.push_bind(tls_version);
+    }
+
+    if let Some(alpn) = query.alpn {
+        query_builder.push(" AND r.alpn = ");
+        query_builder.push_bind(alpn);
+    }
+
+    if let Some(latency_min) = query.latency_min {
+        query_builder.push(" AND r.latency >= ");
+        query_builder.push_bind(latency_min);
+    }
+
+    if let Some(latency_max) = query.latency_max {
+        query_builder.push(" AND r.latency <= ");
+        query_builder.push_bind(latency_max);
+    }
+
+    if let Some(since) = query.since {
+        query_builder.push(" AND r.scanned_at >= ");
+        query_builder.push_bind(since);
     }
 
     query_builder.push(" ORDER BY r.scanned_at DESC");
@@ -678,7 +1197,7 @@ pub async fn get_results_handler(
 
     let rows: Vec<DbResultRow> = query_builder
         .build_query_as()
-        .fetch_all(&state.db)
+        .fetch_all(db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -702,7 +1221,15 @@ pub async fn get_results_handler(
         })
         .collect();
 
-    Ok(Json(results))
+    Ok(results)
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
 }
 
 pub async fn delete_result_handler(

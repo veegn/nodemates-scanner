@@ -14,6 +14,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV DATA_DIR=/app/data
+VOLUME ["/app/data"]
 
 # Copy the compiled binary and static files from the builder stage
 COPY --from=builder /usr/src/app/target/release/nodemates-scanner /app/nodemates-scanner

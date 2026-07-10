@@ -11,7 +11,8 @@
 - 🌐 **双语支持**: 纯前端 i18n 支持，自动检测用户语言 (中/英)，并支持手动切换。
 - 📡 **多端口扫描**: 可同时探测多个常见的 SSL 端口 (如 443, 8443, 2053, 2083, 2087, 2096)。
 - 🌍 **实时 GeoIP**: 集成 MaxMind GeoLite2，瞬间识别服务器地理位置。
-- ☁️ **Cloudflare Radar 人机数据**: 鼠标悬浮在 IP 上时展示 ASN 信息与近 7 天 Human/Bot 流量占比。
+- ☁️ **Cloudflare Radar ASN 画像**: 鼠标悬浮在 IP 上时展示 ASN、Human/Bot、HTTP 协议、TLS/IP/设备分布、BGP 异常与攻击画像。
+- 📤 **过滤与导出**: 历史结果支持按域名、地区、ASN、端口和延迟过滤，并可导出 CSV。
 - 🛡️ **防滥用与限速**: 内置 SQLite 数据库，对已完成的 CIDR/IP 扫描结果实施 30 天的锁定缓存，防止扫描滥用。
 - ⏯️ **断点续扫**: 自动保存大段 CIDR 扫描进度。如果扫描被中止或断开，可精准从中断处恢复。
 
@@ -41,7 +42,7 @@
    export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
    ```
 
-   未配置时扫描和 ASN 展示仍可使用，但悬浮窗中的 Radar 人机数据会显示为未配置。
+   未配置时扫描和 ASN 展示仍可使用，但悬浮窗中的 Radar 画像会显示为未配置。
 
 4. **运行服务端**:
 
@@ -53,6 +54,22 @@
 
    在浏览器中打开 `http://localhost:3000`。
 
+### 可选环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `BIND_ADDR` | `0.0.0.0:3000` | 服务监听地址 |
+| `DATA_DIR` | `.` | 数据库与 GeoIP 文件目录 |
+| `DATABASE_URL` | `sqlite:${DATA_DIR}/results.db?mode=rwc` | SQLite 连接地址 |
+| `COUNTRY_DB_PATH` | `${DATA_DIR}/Country.mmdb` | Country GeoIP 数据库路径 |
+| `ASN_DB_PATH` | `${DATA_DIR}/GeoLite2-ASN.mmdb` | ASN GeoIP 数据库路径 |
+| `CLOUDFLARE_API_TOKEN` | 空 | Cloudflare Radar API Token |
+| `RADAR_DATE_RANGE` | `7d` | Radar ASN 画像查询窗口 |
+| `RADAR_CACHE_TTL_SECS` | `21600` | Radar ASN 缓存时间 |
+| `SCAN_CHECKPOINT_INTERVAL` | `100` | 扫描进度写库间隔 |
+
+健康检查端点：`/healthz` 与 `/readyz`。
+
 ### Docker 支持
 
 您可以使用 Docker 轻松部署 nodemates-scanner：
@@ -61,8 +78,11 @@
 # 构建镜像
 docker build -t nodemates-scanner .
 
-# 运行容器
-docker run -d -p 3000:3000 -e CLOUDFLARE_API_TOKEN=your_cloudflare_api_token --name nodemates nodemates-scanner
+# 运行容器，持久化 SQLite 与 GeoIP 数据
+docker run -d -p 3000:3000 \
+  -v nodemates-data:/app/data \
+  -e CLOUDFLARE_API_TOKEN=your_cloudflare_api_token \
+  --name nodemates nodemates-scanner
 ```
 
 ## 使用方法与界面
@@ -71,6 +91,8 @@ docker run -d -p 3000:3000 -e CLOUDFLARE_API_TOKEN=your_cloudflare_api_token --n
 - **端口选择**: 点击药丸形状的复选框即可同时扫描多个端口。
 - **实时数据流**: 探测节点时，结果会通过 WebSocket 立即流式传输到 UI 上。“可行 (Feasible)” 节点 (支持 TLS 1.3 + ALPN h2 且域名有效) 将被高亮并置顶显示。
 - **数据库历史**: 切换到 “Database (节点图库)” 标签页，可以查看、筛选 (按地区/域名) 或删除 SQLite 数据库中之前发现的可用节点。
+- **CSV 导出**: 历史页顶部的导出按钮会按当前筛选条件导出结果。
+- **ASN 悬浮画像**: IP 悬浮窗会读取 Cloudflare Radar，展示 ASN 的 HTTP 画像、BGP hijack/route leak/RPKI 摘要，以及 L7/L3 攻击分布。
 
 ## 架构
 

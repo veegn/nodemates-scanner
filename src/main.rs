@@ -1,3 +1,4 @@
+mod db;
 mod handlers;
 mod models;
 mod scan_events;
@@ -6,129 +7,45 @@ mod settings;
 mod targets;
 
 use axum::{Router, routing::get};
+use models::{AppConfig, AppState};
 use sqlx::sqlite::SqlitePoolOptions;
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
+use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
-
-use models::AppState;
 
 #[tokio::main]
 async fn main() {
-    ensure_geo_db().await;
+    let config = AppConfig::from_env();
+    ensure_geo_db(&config).await;
     println!("Initializing node scanner...");
 
     let db = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect("sqlite:results.db?mode=rwc")
+        .connect(&config.database_url)
         .await
-        .unwrap();
+        .expect("failed to connect SQLite database");
 
-    let _ = sqlx::query("PRAGMA journal_mode=WAL;").execute(&db).await;
+    db::init_db(&db)
+        .await
+        .expect("failed to initialize database");
 
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS scan_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ip TEXT NOT NULL,
-            port INTEGER DEFAULT 443,
-            origin TEXT NOT NULL,
-            tls_version TEXT,
-            alpn TEXT,
-            cert_domain TEXT,
-            cert_issuer TEXT,
-            geo_code TEXT,
-            feasible BOOLEAN,
-            cert_type TEXT DEFAULT '-',
-            asn_number INTEGER DEFAULT 0,
-            asn_org TEXT DEFAULT '',
-            latency INTEGER DEFAULT 0,
-            cert_validity TEXT DEFAULT '',
-            scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS idx_ip ON scan_results(ip);
-        CREATE INDEX IF NOT EXISTS idx_domain ON scan_results(cert_domain);
-        CREATE INDEX IF NOT EXISTS idx_geo ON scan_results(geo_code);
-        CREATE INDEX IF NOT EXISTS idx_feasible ON scan_results(feasible);
-
-        CREATE TABLE IF NOT EXISTS scan_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target TEXT NOT NULL,
-            total_tasks INTEGER DEFAULT 0,
-            completed_tasks INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'COMPLETED',
-            scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS idx_target ON scan_history(target);
-
-        CREATE TABLE IF NOT EXISTS scan_task_results (
-            history_id INTEGER NOT NULL,
-            result_id INTEGER NOT NULL,
-            PRIMARY KEY (history_id, result_id)
-        );
-        
-        CREATE TABLE IF NOT EXISTS system_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );",
-    )
-    .execute(&db)
-    .await
-    .unwrap();
-
-    let default_settings = vec![
-        ("concurrency_limit", "50"),
-        ("max_cidr_ipv4", "24"),
-        ("max_cidr_ipv6", "120"),
-        ("cooldown_days", "30"),
-        ("allowed_ports", "443,8443,2053,2083,2087,2096"),
-    ];
-
-    for (k, v) in default_settings {
-        let _ = sqlx::query("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)")
-            .bind(k)
-            .bind(v)
-            .execute(&db)
-            .await;
-    }
-
-    // Ignore error if columns already exist
-    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN port INTEGER DEFAULT 443")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN total_tasks INTEGER DEFAULT 0")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_org TEXT DEFAULT ''")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_number INTEGER DEFAULT 0")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN latency INTEGER DEFAULT 0")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN cert_validity TEXT DEFAULT ''")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN completed_tasks INTEGER DEFAULT 0")
-        .execute(&db)
-        .await;
-    let _ = sqlx::query("ALTER TABLE scan_history ADD COLUMN status TEXT DEFAULT 'COMPLETED'")
-        .execute(&db)
-        .await;
-
-    // Clean up duplicates after compatibility migrations and before creating the unique index.
-    let _ = sqlx::query("DELETE FROM scan_results WHERE id NOT IN (SELECT MAX(id) FROM scan_results GROUP BY ip, port)")
-        .execute(&db).await;
-    let _ = sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_port ON scan_results(ip, port)")
-        .execute(&db)
-        .await;
-
-    let state = AppState { db: db.clone() };
+    let state = AppState {
+        db: db.clone(),
+        config: config.clone(),
+        http_client: reqwest::Client::new(),
+        radar_cache: Arc::new(RwLock::new(HashMap::new())),
+    };
 
     let app = Router::new()
         .nest_service("/", ServeDir::new("static"))
+        .route("/healthz", get(handlers::health_handler))
+        .route("/readyz", get(handlers::health_handler))
         .route("/scan", get(handlers::ws_scan_handler))
         .route("/results", get(handlers::get_results_handler))
+        .route(
+            "/results/export.csv",
+            get(handlers::export_results_csv_handler),
+        )
         .route(
             "/radar/asn/:asn/bot-class",
             get(handlers::get_asn_bot_summary_handler),
@@ -148,26 +65,80 @@ async fn main() {
         )
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr: SocketAddr = config
+        .bind_addr
+        .parse()
+        .expect("BIND_ADDR must be a valid socket address");
     println!("Listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind listener");
+    axum::serve(listener, app)
+        .await
+        .expect("server exited unexpectedly");
 }
 
-async fn ensure_geo_db() {
+impl AppConfig {
+    fn from_env() -> Self {
+        let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| ".".to_string());
+        let country_db_path = std::env::var("COUNTRY_DB_PATH")
+            .unwrap_or_else(|_| data_path(&data_dir, "Country.mmdb"));
+        let asn_db_path = std::env::var("ASN_DB_PATH")
+            .unwrap_or_else(|_| data_path(&data_dir, "GeoLite2-ASN.mmdb"));
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| format!("sqlite:{}?mode=rwc", data_path(&data_dir, "results.db")));
+
+        Self {
+            bind_addr: std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string()),
+            database_url,
+            data_dir,
+            country_db_path,
+            asn_db_path,
+            radar_date_range: std::env::var("RADAR_DATE_RANGE")
+                .unwrap_or_else(|_| "7d".to_string()),
+            radar_cache_ttl_secs: env_u64("RADAR_CACHE_TTL_SECS", 21_600),
+            scan_checkpoint_interval: env_usize("SCAN_CHECKPOINT_INTERVAL", 100).max(1),
+        }
+    }
+}
+
+fn data_path(data_dir: &str, filename: &str) -> String {
+    let path = PathBuf::from(data_dir).join(filename);
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+async fn ensure_geo_db(config: &AppConfig) {
+    if let Err(e) = std::fs::create_dir_all(&config.data_dir) {
+        println!("Failed to create data directory {}: {}", config.data_dir, e);
+    }
+
     let dbs = vec![
         (
-            "Country.mmdb",
+            &config.country_db_path,
             "https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb",
         ),
         (
-            "GeoLite2-ASN.mmdb",
+            &config.asn_db_path,
             "https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb",
         ),
     ];
 
     for (db_path, url) in dbs {
-        if !std::path::Path::new(db_path).exists() {
+        if !std::path::Path::new(&db_path).exists() {
             println!("Database ({}) not found. Downloading...", db_path);
             match reqwest::get(url).await {
                 Ok(response) => {

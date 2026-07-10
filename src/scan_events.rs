@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::models::ScanResult;
+
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScanMode {
@@ -39,6 +41,12 @@ pub enum ScanEvent {
     },
     Info {
         message: String,
+    },
+    Error {
+        message: String,
+    },
+    Result {
+        result: Box<ScanResult>,
     },
 }
 
