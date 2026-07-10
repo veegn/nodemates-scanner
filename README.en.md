@@ -11,6 +11,7 @@ An advanced, high-performance web-based utility for asynchronous TLS probing and
 - 🌐 **Bilingual UI**: Frontend i18n support with automatic Chinese/English detection and manual switching.
 - 📡 **Multi-port scanning**: Probe multiple common SSL ports at the same time, including 443, 8443, 2053, 2083, 2087, and 2096.
 - 🌍 **Real-time GeoIP**: Integrates MaxMind GeoLite2 for fast geographic lookup.
+- ☁️ **Cloudflare Radar Human/Bot data**: Hover an IP to view ASN details and the last 7 days of Human/Bot traffic share.
 - 🛡️ **Abuse prevention and rate limiting**: Uses SQLite-backed scan history with a 30-day completed-scan cooldown for CIDR/IP targets.
 - ⏯️ **Breakpoint resumption**: Saves progress for larger CIDR scans so interrupted scans can resume from the last completed task.
 
@@ -34,13 +35,21 @@ An advanced, high-performance web-based utility for asynchronous TLS probing and
 
    Place a MaxMind GeoLite2/GeoIP2 Country database in the project root named `Country.mmdb`. The project will try to download it automatically on first run, but you can also [download it manually](https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb).
 
-3. **Run the server**:
+3. **Configure a Cloudflare Radar API token** (optional, required for Human/Bot hover data):
+
+   ```bash
+   export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+   ```
+
+   Scanning and ASN display still work without the token, but the Radar Human/Bot panel will show that the token is not configured.
+
+4. **Run the server**:
 
    ```bash
    cargo run --release
    ```
 
-4. **Open the Web UI**:
+5. **Open the Web UI**:
 
    Visit `http://localhost:3000` in your browser.
 
@@ -53,7 +62,7 @@ You can deploy nodemates-scanner with Docker:
 docker build -t nodemates-scanner .
 
 # Run the container
-docker run -d -p 3000:3000 --name nodemates nodemates-scanner
+docker run -d -p 3000:3000 -e CLOUDFLARE_API_TOKEN=your_cloudflare_api_token --name nodemates nodemates-scanner
 ```
 
 ## Usage And Interface

@@ -27,6 +27,7 @@ pub struct ScanResult {
     pub cert_domain: String,
     pub cert_issuer: String,
     pub geo_code: String,
+    pub asn_number: u32,
     pub asn_org: String,
     pub latency: u32,
     pub feasible: bool,
@@ -68,9 +69,20 @@ pub struct DbScanResult {
     pub cert_validity: String,
     pub geo_code: String,
     pub cert_type: String,
+    pub asn_number: u32,
     pub asn_org: String,
     pub latency: u32,
     pub scanned_at: String,
+}
+
+#[derive(Serialize)]
+pub struct RadarBotClassSummary {
+    pub asn: u32,
+    pub human: f64,
+    pub bot: f64,
+    pub date_range: String,
+    pub last_updated: String,
+    pub radar_url: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

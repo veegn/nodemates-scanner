@@ -38,6 +38,7 @@ async fn main() {
             geo_code TEXT,
             feasible BOOLEAN,
             cert_type TEXT DEFAULT '-',
+            asn_number INTEGER DEFAULT 0,
             asn_org TEXT DEFAULT '',
             latency INTEGER DEFAULT 0,
             cert_validity TEXT DEFAULT '',
@@ -99,6 +100,9 @@ async fn main() {
     let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_org TEXT DEFAULT ''")
         .execute(&db)
         .await;
+    let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN asn_number INTEGER DEFAULT 0")
+        .execute(&db)
+        .await;
     let _ = sqlx::query("ALTER TABLE scan_results ADD COLUMN latency INTEGER DEFAULT 0")
         .execute(&db)
         .await;
@@ -125,6 +129,10 @@ async fn main() {
         .nest_service("/", ServeDir::new("static"))
         .route("/scan", get(handlers::ws_scan_handler))
         .route("/results", get(handlers::get_results_handler))
+        .route(
+            "/radar/asn/:asn/bot-class",
+            get(handlers::get_asn_bot_summary_handler),
+        )
         .route(
             "/results/:ip",
             axum::routing::delete(handlers::delete_result_handler),

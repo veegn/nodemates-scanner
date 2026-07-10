@@ -67,7 +67,13 @@ const translations = {
         badgeFeasible: "Feasible",
         badgeFailed: "Invalid",
         btnBack: "Back",
-        settingsTitle: "System Settings"
+        settingsTitle: "System Settings",
+        radarLoading: "Loading...",
+        radarHuman: "Human",
+        radarBot: "Bot",
+        radarUpdated: "Updated",
+        radarTokenMissing: "Token not configured",
+        radarUnavailable: "Radar unavailable"
     },
     zh: {
         pageTitle: "nodemates-scanner - 高级 TLS 节点嗅探",
@@ -137,7 +143,13 @@ const translations = {
         badgeFeasible: "可用",
         badgeFailed: "无效",
         btnBack: "返回",
-        settingsTitle: "系统设置"
+        settingsTitle: "系统设置",
+        radarLoading: "加载中...",
+        radarHuman: "人类",
+        radarBot: "机器人",
+        radarUpdated: "更新",
+        radarTokenMissing: "未配置 Token",
+        radarUnavailable: "Radar 不可用"
     }
 };
 
@@ -361,6 +373,185 @@ function appendTextCell(tr, text, tooltipText = null) {
     if (tooltipText) {
         td.title = tooltipText;
     }
+    tr.appendChild(td);
+    return td;
+}
+
+function formatAsn(row) {
+    const number = Number(row.asn_number || 0);
+    const org = row.asn_org || '';
+    if (number > 0 && org) return `AS${number} ${org}`;
+    if (number > 0) return `AS${number}`;
+    return org || '-';
+}
+
+function hasAsn(row) {
+    return Number(row.asn_number || 0) > 0 || Boolean(row.asn_org);
+}
+
+function getAsnNumber(row) {
+    return Number(row.asn_number || 0);
+}
+
+function formatPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    const digits = number > 0 && number < 1 ? 2 : 1;
+    return `${number.toFixed(digits)}%`;
+}
+
+function formatRadarUpdated(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+        hour12: false,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+const radarBotSummaryCache = new Map();
+let activeAsnPopover = null;
+
+function positionAsnPopover(event, popover) {
+    const offset = 14;
+    const margin = 12;
+    const width = popover.offsetWidth;
+    const height = popover.offsetHeight;
+    let left = event.clientX + offset;
+    let top = event.clientY + offset;
+
+    if (left + width + margin > window.innerWidth) {
+        left = Math.max(margin, event.clientX - width - offset);
+    }
+    if (top + height + margin > window.innerHeight) {
+        top = Math.max(margin, event.clientY - height - offset);
+    }
+
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+}
+
+function hideAsnPopover() {
+    if (activeAsnPopover) {
+        activeAsnPopover.remove();
+        activeAsnPopover = null;
+    }
+}
+
+function addPopoverLine(popover, label, value) {
+    const line = document.createElement('div');
+    line.className = 'asn-popover-line';
+
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = value || '-';
+
+    line.appendChild(labelEl);
+    line.appendChild(valueEl);
+    popover.appendChild(line);
+
+    return { line, valueEl };
+}
+
+async function getRadarBotSummary(asn) {
+    if (radarBotSummaryCache.has(asn)) {
+        return radarBotSummaryCache.get(asn);
+    }
+
+    const request = fetch(`/radar/asn/${asn}/bot-class`)
+        .then(async (response) => {
+            if (!response.ok) {
+                const error = new Error(await response.text());
+                error.status = response.status;
+                throw error;
+            }
+            return response.json();
+        })
+        .catch((error) => {
+            radarBotSummaryCache.delete(asn);
+            throw error;
+        });
+
+    radarBotSummaryCache.set(asn, request);
+    return request;
+}
+
+function setRadarLineValue(popover, line, value) {
+    if (activeAsnPopover !== popover || !popover.isConnected) return;
+    line.valueEl.textContent = value || '-';
+}
+
+function loadRadarBotSummary(popover, row, radarLine, humanLine, botLine, updatedLine) {
+    const asn = getAsnNumber(row);
+    if (asn <= 0) return;
+
+    getRadarBotSummary(asn)
+        .then((summary) => {
+            const range = summary.date_range ? summary.date_range.toUpperCase() : '-';
+            setRadarLineValue(popover, radarLine, range);
+            setRadarLineValue(popover, humanLine, formatPercent(summary.human));
+            setRadarLineValue(popover, botLine, formatPercent(summary.bot));
+            setRadarLineValue(popover, updatedLine, formatRadarUpdated(summary.last_updated));
+        })
+        .catch((error) => {
+            const message = error.status === 503 ? t.radarTokenMissing : t.radarUnavailable;
+            setRadarLineValue(popover, radarLine, message);
+            setRadarLineValue(popover, humanLine, '-');
+            setRadarLineValue(popover, botLine, '-');
+            setRadarLineValue(popover, updatedLine, '-');
+        });
+}
+
+function showAsnPopover(event, row) {
+    if (!hasAsn(row)) return;
+
+    hideAsnPopover();
+
+    const popover = document.createElement('div');
+    popover.className = 'asn-popover';
+    addPopoverLine(popover, 'IP', row.ip || '-');
+    addPopoverLine(popover, 'ASN', formatAsn(row));
+
+    if (getAsnNumber(row) > 0) {
+        const radarLine = addPopoverLine(popover, 'Radar', t.radarLoading);
+        const humanLine = addPopoverLine(popover, t.radarHuman, '-');
+        const botLine = addPopoverLine(popover, t.radarBot, '-');
+        const updatedLine = addPopoverLine(popover, t.radarUpdated, '-');
+        loadRadarBotSummary(popover, row, radarLine, humanLine, botLine, updatedLine);
+    }
+
+    document.body.appendChild(popover);
+    activeAsnPopover = popover;
+    positionAsnPopover(event, popover);
+}
+
+function appendIpCell(tr, row) {
+    const td = document.createElement('td');
+    const span = document.createElement('span');
+    span.textContent = row.ip || '-';
+
+    if (hasAsn(row)) {
+        span.className = 'ip-hover-target';
+        span.tabIndex = 0;
+        span.addEventListener('mouseenter', (event) => showAsnPopover(event, row));
+        span.addEventListener('mousemove', (event) => {
+            if (activeAsnPopover) positionAsnPopover(event, activeAsnPopover);
+        });
+        span.addEventListener('mouseleave', hideAsnPopover);
+        span.addEventListener('focus', (event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            showAsnPopover({ clientX: rect.left, clientY: rect.bottom }, row);
+        });
+        span.addEventListener('blur', hideAsnPopover);
+    }
+
+    td.appendChild(span);
     tr.appendChild(td);
     return td;
 }
@@ -733,7 +924,7 @@ function renderTaskResults(container, data) {
 
     for (const row of data) {
         const tr = document.createElement('tr');
-        appendTextCell(tr, row.ip, row.asn_org ? `ASN: ${row.asn_org}` : null);
+        appendIpCell(tr, row);
         appendTextCell(tr, String(row.port));
         appendLatencyCell(tr, row.latency);
         appendTextCell(tr, row.tls_version);
@@ -966,7 +1157,7 @@ form.addEventListener('submit', async (e) => {
             renderTaskState();
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 7;
+            td.colSpan = 8;
             td.style.textAlign = 'center';
             td.style.color = 'var(--accent-primary)';
             td.style.fontWeight = '500';
@@ -1025,7 +1216,7 @@ function addResultRow(result) {
         current: formatTemplate(t.taskCurrent, { ip: result.ip, port: result.port }),
     });
 
-    if (!result.feasible && !result.cert_domain) {
+    if (!result.feasible && !result.cert_domain && !result.asn_number && !result.asn_org) {
         return;
     }
 
@@ -1035,7 +1226,7 @@ function addResultRow(result) {
     tr.style.transform = 'translateY(10px)';
     tr.style.transition = 'all 0.3s ease';
 
-    appendTextCell(tr, result.ip, result.asn_org ? `ASN: ${result.asn_org}` : null);
+    appendIpCell(tr, result);
     appendTextCell(tr, String(result.port));
     appendLatencyCell(tr, result.latency);
     appendTextCell(tr, result.tls_version);

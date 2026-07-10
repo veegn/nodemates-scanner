@@ -13,7 +13,8 @@ use std::sync::Arc;
 use tokio_rustls::TlsConnector;
 
 use crate::models::{
-    AppState, DbScanResult, DeleteResultQuery, ResultsQuery, ScanRequest, SystemSettings,
+    AppState, DbScanResult, DeleteResultQuery, RadarBotClassSummary, ResultsQuery, ScanRequest,
+    SystemSettings,
 };
 use crate::scan_events::{ScanEvent, ScanMode, ScanStatus};
 use crate::scanner::{DummyVerifier, scan_tls};
@@ -33,6 +34,7 @@ type CachedResultRow = (
     String,
     String,
     i64,
+    i64,
     String,
     bool,
 );
@@ -48,6 +50,7 @@ type DbResultRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<i64>,
     Option<i64>,
     Option<String>,
 );
@@ -248,7 +251,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let origin = &origins[i];
             for port in &ports {
                 let row: Option<CachedResultRow> = sqlx::query_as(
-                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, latency, cert_validity, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
+                    "SELECT ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, asn_number, latency, cert_validity, feasible FROM scan_results WHERE ip = ? AND port = ? ORDER BY scanned_at DESC LIMIT 1"
                 )
                 .bind(ip.to_string())
                 .bind(*port as i64)
@@ -269,13 +272,21 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         cert_domain: r.5,
                         cert_issuer: r.6,
                         geo_code: r.7,
+                        asn_number: r.9 as u32,
                         asn_org: r.8,
-                        latency: r.9 as u32,
-                        cert_validity: r.10,
-                        feasible: r.11,
+                        latency: r.10 as u32,
+                        cert_validity: r.11,
+                        feasible: r.12,
                     }
                 } else {
-                    crate::scanner::default_fail_result(*ip, *port, origin.clone(), "N/A".into())
+                    crate::scanner::default_fail_result(
+                        *ip,
+                        *port,
+                        origin.clone(),
+                        "N/A".into(),
+                        0,
+                        "".into(),
+                    )
                 };
 
                 let json = serde_json::to_string(&res).unwrap();
@@ -355,15 +366,15 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let res = scan_tls(ip, origin, port, timeout_secs, tls, geo, asn).await;
             if res.feasible {
                 let db_res = sqlx::query(
-                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_org, latency, cert_validity, feasible, cert_type, scanned_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    "INSERT INTO scan_results (ip, port, origin, tls_version, alpn, cert_domain, cert_issuer, geo_code, asn_number, asn_org, latency, cert_validity, feasible, cert_type, scanned_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                      ON CONFLICT(ip, port) DO UPDATE SET
                      origin=excluded.origin, tls_version=excluded.tls_version, alpn=excluded.alpn, 
                      cert_domain=excluded.cert_domain, cert_issuer=excluded.cert_issuer, 
-                     geo_code=excluded.geo_code, asn_org=excluded.asn_org, latency=excluded.latency, cert_validity=excluded.cert_validity, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP
+                     geo_code=excluded.geo_code, asn_number=excluded.asn_number, asn_org=excluded.asn_org, latency=excluded.latency, cert_validity=excluded.cert_validity, feasible=excluded.feasible, cert_type=excluded.cert_type, scanned_at=CURRENT_TIMESTAMP
                      RETURNING id"
                 )
-                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(&res.asn_org).bind(res.latency).bind(&res.cert_validity).bind(res.feasible).bind(&res.cert_publickey)
+                .bind(&res.ip).bind(res.port).bind(&res.origin).bind(&res.tls_version).bind(&res.alpn).bind(&res.cert_domain).bind(&res.cert_issuer).bind(&res.geo_code).bind(res.asn_number).bind(&res.asn_org).bind(res.latency).bind(&res.cert_validity).bind(res.feasible).bind(&res.cert_publickey)
                 .fetch_one(&db).await;
 
                 match db_res {
@@ -520,12 +531,119 @@ pub async fn get_history_tasks_handler(
     Ok(Json(results))
 }
 
+pub async fn get_asn_bot_summary_handler(
+    Path(asn): Path<u32>,
+) -> Result<Json<RadarBotClassSummary>, (StatusCode, String)> {
+    if asn == 0 {
+        return Err((StatusCode::BAD_REQUEST, "ASN must be greater than 0".into()));
+    }
+
+    let token = std::env::var("CLOUDFLARE_API_TOKEN").map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Cloudflare Radar API token is not configured. Set CLOUDFLARE_API_TOKEN.".to_string(),
+        )
+    })?;
+
+    let date_range = "7d";
+    let url = format!(
+        "https://api.cloudflare.com/client/v4/radar/http/summary/bot_class?asn={}&dateRange={}&format=json",
+        asn, date_range
+    );
+
+    let response = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to query Cloudflare Radar: {}", e),
+            )
+        })?;
+
+    let status = response.status();
+    let body = response.text().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to read Cloudflare Radar response: {}", e),
+        )
+    })?;
+
+    if !status.is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Cloudflare Radar returned {}: {}", status, body),
+        ));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to parse Cloudflare Radar response: {}", e),
+        )
+    })?;
+
+    if !json
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar returned an unsuccessful response".into(),
+        ));
+    }
+
+    let summary = json.pointer("/result/summary_0").ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar response is missing summary data".to_string(),
+        )
+    })?;
+    let human = parse_radar_percentage(summary.get("human")).ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar response is missing human traffic data".to_string(),
+        )
+    })?;
+    let bot = parse_radar_percentage(summary.get("bot")).ok_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "Cloudflare Radar response is missing bot traffic data".to_string(),
+        )
+    })?;
+    let last_updated = json
+        .pointer("/result/meta/lastUpdated")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    Ok(Json(RadarBotClassSummary {
+        asn,
+        human,
+        bot,
+        date_range: date_range.into(),
+        last_updated,
+        radar_url: format!("https://radar.cloudflare.com/bots/as{}", asn),
+    }))
+}
+
+fn parse_radar_percentage(value: Option<&serde_json::Value>) -> Option<f64> {
+    match value? {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
 pub async fn get_results_handler(
     State(state): State<AppState>,
     Query(query): Query<ResultsQuery>,
 ) -> Result<Json<Vec<DbScanResult>>, (StatusCode, String)> {
     let mut query_builder = sqlx::QueryBuilder::new(
-        "SELECT r.ip, r.port, r.origin, r.tls_version, r.alpn, r.cert_domain, r.cert_issuer, r.geo_code, r.cert_type, r.scanned_at, r.asn_org, r.latency, r.cert_validity FROM scan_results r",
+        "SELECT r.ip, r.port, r.origin, r.tls_version, r.alpn, r.cert_domain, r.cert_issuer, r.geo_code, r.cert_type, r.scanned_at, r.asn_org, r.asn_number, r.latency, r.cert_validity FROM scan_results r",
     );
 
     if let Some(history_id) = query.history_id {
@@ -578,8 +696,9 @@ pub async fn get_results_handler(
             cert_type: row.8.unwrap_or_default(),
             scanned_at: row.9.unwrap_or_default(),
             asn_org: row.10.unwrap_or_default(),
-            latency: row.11.unwrap_or(0) as u32,
-            cert_validity: row.12.unwrap_or_default(),
+            asn_number: row.11.unwrap_or(0) as u32,
+            latency: row.12.unwrap_or(0) as u32,
+            cert_validity: row.13.unwrap_or_default(),
         })
         .collect();
 

@@ -11,6 +11,7 @@
 - 🌐 **双语支持**: 纯前端 i18n 支持，自动检测用户语言 (中/英)，并支持手动切换。
 - 📡 **多端口扫描**: 可同时探测多个常见的 SSL 端口 (如 443, 8443, 2053, 2083, 2087, 2096)。
 - 🌍 **实时 GeoIP**: 集成 MaxMind GeoLite2，瞬间识别服务器地理位置。
+- ☁️ **Cloudflare Radar 人机数据**: 鼠标悬浮在 IP 上时展示 ASN 信息与近 7 天 Human/Bot 流量占比。
 - 🛡️ **防滥用与限速**: 内置 SQLite 数据库，对已完成的 CIDR/IP 扫描结果实施 30 天的锁定缓存，防止扫描滥用。
 - ⏯️ **断点续扫**: 自动保存大段 CIDR 扫描进度。如果扫描被中止或断开，可精准从中断处恢复。
 
@@ -34,13 +35,21 @@
 
    将 MaxMind GeoLite2/GeoIP2 Country 数据库放置在项目根目录下，命名为 `Country.mmdb`。项目会在首次运行时尝试自动下载，但您也可以 [在此手动下载](https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb)。
 
-3. **运行服务端**:
+3. **配置 Cloudflare Radar API Token** (可选，用于悬浮窗 Human/Bot 数据):
+
+   ```bash
+   export CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+   ```
+
+   未配置时扫描和 ASN 展示仍可使用，但悬浮窗中的 Radar 人机数据会显示为未配置。
+
+4. **运行服务端**:
 
    ```bash
    cargo run --release
    ```
 
-4. **访问 Web UI**:
+5. **访问 Web UI**:
 
    在浏览器中打开 `http://localhost:3000`。
 
@@ -53,7 +62,7 @@
 docker build -t nodemates-scanner .
 
 # 运行容器
-docker run -d -p 3000:3000 --name nodemates nodemates-scanner
+docker run -d -p 3000:3000 -e CLOUDFLARE_API_TOKEN=your_cloudflare_api_token --name nodemates nodemates-scanner
 ```
 
 ## 使用方法与界面

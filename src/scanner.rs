@@ -128,7 +128,14 @@ pub fn is_internal_ip(ip: &IpAddr) -> bool {
     }
 }
 
-pub fn default_fail_result(ip: IpAddr, port: u16, origin: String, geo_code: String) -> ScanResult {
+pub fn default_fail_result(
+    ip: IpAddr,
+    port: u16,
+    origin: String,
+    geo_code: String,
+    asn_number: u32,
+    asn_org: String,
+) -> ScanResult {
     ScanResult {
         ip: ip.to_string(),
         port,
@@ -141,7 +148,8 @@ pub fn default_fail_result(ip: IpAddr, port: u16, origin: String, geo_code: Stri
         cert_domain: "".into(),
         cert_issuer: "".into(),
         geo_code,
-        asn_org: "".into(),
+        asn_number,
+        asn_org,
         latency: 0,
         cert_validity: "".into(),
         feasible: false,
@@ -167,11 +175,16 @@ pub async fn scan_tls(
     }
 
     let mut asn_org = "".to_string();
+    let mut asn_number = 0;
     if let Some(asn_db) = &asn_reader
         && let Ok(asn) = asn_db.lookup::<maxminddb::geoip2::Asn>(ip)
-        && let Some(org) = asn.autonomous_system_organization
     {
-        asn_org = org.to_string();
+        if let Some(number) = asn.autonomous_system_number {
+            asn_number = number;
+        }
+        if let Some(org) = asn.autonomous_system_organization {
+            asn_org = org.to_string();
+        }
     }
 
     let start_time = tokio::time::Instant::now();
@@ -180,7 +193,7 @@ pub async fn scan_tls(
     let connect_future = TcpStream::connect(addr);
     let tcp_stream = match timeout(Duration::from_secs(timeout_secs), connect_future).await {
         Ok(Ok(s)) => s,
-        _ => return default_fail_result(ip, port, origin, geo_code),
+        _ => return default_fail_result(ip, port, origin, geo_code, asn_number, asn_org),
     };
 
     let server_name = server_name_for_origin(&origin, ip);
@@ -188,7 +201,7 @@ pub async fn scan_tls(
     let tls_future = tls_connector.connect(server_name, tcp_stream);
     let tls_stream = match timeout(Duration::from_secs(timeout_secs), tls_future).await {
         Ok(Ok(s)) => s,
-        _ => return default_fail_result(ip, port, origin, geo_code),
+        _ => return default_fail_result(ip, port, origin, geo_code, asn_number, asn_org),
     };
 
     let latency = start_time.elapsed().as_millis() as u32;
@@ -254,6 +267,7 @@ pub async fn scan_tls(
         cert_domain,
         cert_issuer,
         geo_code,
+        asn_number,
         asn_org,
         latency,
         cert_validity,
