@@ -648,12 +648,13 @@ pub async fn get_asn_bot_summary_handler(
     let last_updated = radar_last_updated(&bot_json);
 
     let device_type =
-        radar_dimension_or_empty(&state, &token, asn, &date_range, "DEVICE_TYPE").await;
+        radar_http_dimension_or_empty(&state, &token, asn, &date_range, "DEVICE_TYPE").await;
     let http_protocol =
-        radar_dimension_or_empty(&state, &token, asn, &date_range, "HTTP_PROTOCOL").await;
-    let ip_version = radar_dimension_or_empty(&state, &token, asn, &date_range, "IP_VERSION").await;
+        radar_http_dimension_or_empty(&state, &token, asn, &date_range, "HTTP_PROTOCOL").await;
+    let ip_version =
+        radar_http_dimension_or_empty(&state, &token, asn, &date_range, "IP_VERSION").await;
     let tls_version =
-        radar_dimension_or_empty(&state, &token, asn, &date_range, "TLS_VERSION").await;
+        radar_http_dimension_or_empty(&state, &token, asn, &date_range, "TLS_VERSION").await;
     let bgp = radar_bgp_risk_or_empty(&state, &token, asn, &date_range).await;
     let attacks = radar_attacks_or_empty(&state, &token, asn, &date_range).await;
 
@@ -685,7 +686,7 @@ fn parse_radar_percentage(value: Option<&serde_json::Value>) -> Option<f64> {
     }
 }
 
-async fn radar_dimension_or_empty(
+async fn radar_http_dimension_or_empty(
     state: &AppState,
     token: &str,
     asn: u32,
@@ -696,8 +697,8 @@ async fn radar_dimension_or_empty(
         ("asn", asn.to_string()),
         ("dateRange", date_range.to_string()),
         ("format", "json".to_string()),
-        ("limitPerGroup", "6".to_string()),
     ];
+
     let path = format!("/radar/http/summary/{dimension}");
     match radar_get_json(state, token, &path, &params).await {
         Ok(json) => extract_radar_distribution(&json),
@@ -715,7 +716,6 @@ async fn radar_attacks_or_empty(
         ("asn", asn.to_string()),
         ("dateRange", date_range.to_string()),
         ("format", "json".to_string()),
-        ("limitPerGroup", "6".to_string()),
     ];
 
     let layer7_mitigation = match radar_get_json(

@@ -1396,6 +1396,10 @@ function addResultRow(result) {
         current: formatTemplate(t.taskCurrent, { ip: result.ip, port: result.port }),
     });
 
+    if (result.failure_reason === 'tls_handshake_failed_or_timeout') {
+        return;
+    }
+
     if (!result.feasible && !result.cert_domain && !result.asn_number && !result.asn_org && !result.failure_reason) {
         return;
     }
