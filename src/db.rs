@@ -14,6 +14,13 @@ pub async fn init_db(db: &SqlitePool) -> Result<(), sqlx::Error> {
             alpn TEXT,
             cert_domain TEXT,
             cert_issuer TEXT,
+            cert_sans TEXT DEFAULT '[]',
+            cert_not_before INTEGER DEFAULT 0,
+            cert_not_after INTEGER DEFAULT 0,
+            cert_chain_trusted BOOLEAN DEFAULT FALSE,
+            cert_hostname_match TEXT DEFAULT 'unknown',
+            cert_self_signed TEXT DEFAULT 'unknown',
+            cert_validation TEXT DEFAULT 'unknown',
             geo_code TEXT,
             feasible BOOLEAN,
             cert_type TEXT DEFAULT '-',
@@ -66,6 +73,37 @@ pub async fn init_db(db: &SqlitePool) -> Result<(), sqlx::Error> {
     add_column_if_missing(db, "scan_results", "latency", "INTEGER DEFAULT 0").await?;
     add_column_if_missing(db, "scan_results", "cert_validity", "TEXT DEFAULT ''").await?;
     add_column_if_missing(db, "scan_results", "failure_reason", "TEXT DEFAULT ''").await?;
+    add_column_if_missing(db, "scan_results", "cert_sans", "TEXT DEFAULT '[]'").await?;
+    add_column_if_missing(db, "scan_results", "cert_not_before", "INTEGER DEFAULT 0").await?;
+    add_column_if_missing(db, "scan_results", "cert_not_after", "INTEGER DEFAULT 0").await?;
+    add_column_if_missing(
+        db,
+        "scan_results",
+        "cert_chain_trusted",
+        "BOOLEAN DEFAULT FALSE",
+    )
+    .await?;
+    add_column_if_missing(
+        db,
+        "scan_results",
+        "cert_hostname_match",
+        "TEXT DEFAULT 'unknown'",
+    )
+    .await?;
+    add_column_if_missing(
+        db,
+        "scan_results",
+        "cert_self_signed",
+        "TEXT DEFAULT 'unknown'",
+    )
+    .await?;
+    add_column_if_missing(
+        db,
+        "scan_results",
+        "cert_validation",
+        "TEXT DEFAULT 'unknown'",
+    )
+    .await?;
     add_column_if_missing(db, "scan_history", "total_tasks", "INTEGER DEFAULT 0").await?;
     add_column_if_missing(db, "scan_history", "completed_tasks", "INTEGER DEFAULT 0").await?;
     add_column_if_missing(db, "scan_history", "status", "TEXT DEFAULT 'COMPLETED'").await?;

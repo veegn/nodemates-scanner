@@ -89,7 +89,8 @@ docker run -d -p 3000:3000 \
 
 - **Target input**: Accepts single IPs, domains such as `example.com`, or CIDR blocks such as `107.172.103.0/24`. Private and internal IPs are skipped automatically.
 - **Port selection**: Toggle the pill-style checkboxes to scan multiple ports concurrently.
-- **Real-time pipeline**: Probe results stream to the UI via WebSocket. Feasible nodes, defined as TLS 1.3 + ALPN h2 with certificate metadata, are highlighted and placed at the top.
+- **Real-time pipeline**: Probe results stream to the UI via WebSocket. A protocol match means TLS 1.3, ALPN h2, and parseable certificate metadata; it does not imply certificate trust or service safety.
+- **Certificate evidence labels**: The scanner parses SANs and actual validity timestamps, then independently validates the public trust chain, self-signature, and requested hostname. Brand labels use exact SAN suffixes, while hosting relationships distinguish direct brand networks, CDN/edge, public cloud, and third-party networks. Hover a label to inspect its evidence.
 - **Database history**: Use the Database tab to view, filter by region/domain, or delete previously discovered feasible nodes from SQLite.
 - **CSV export**: The export button on the history page downloads results using the current filters.
 - **ASN hover insights**: The IP hover panel queries Cloudflare Radar for HTTP posture, BGP hijack/route leak/RPKI summaries, and L7/L3 attack distribution.
@@ -99,7 +100,7 @@ docker run -d -p 3000:3000 \
 - **Backend**: Rust, Axum, Tokio, tokio-rustls, sqlx (SQLite).
 - **Frontend**: Vanilla JavaScript (ES6+), CSS3 (Flexbox/Grid, Backdrop-filter), HTML5, WebSocket API.
 - **Database**:
-  - `scan_results`: Stores healthy, feasible nodes along with ALPN, issuer, and GeoIP data.
+  - `scan_results`: Stores protocol-matching nodes with ALPN, SANs, certificate validation, validity, ASN, and GeoIP evidence.
   - `scan_history`: Tracks scan progress, total tasks, and completion timestamps for exact resumption and 30-day cooldown caching.
 
 ## Disclaimer

@@ -89,7 +89,8 @@ docker run -d -p 3000:3000 \
 
 - **目标输入**: 支持单个 IP、域名 (如 `example.com`)，或整个 CIDR IP 段 (如 `107.172.103.0/24`)。私有/内网 IP 会被自动跳过。
 - **端口选择**: 点击药丸形状的复选框即可同时扫描多个端口。
-- **实时数据流**: 探测节点时，结果会通过 WebSocket 立即流式传输到 UI 上。“可行 (Feasible)” 节点 (支持 TLS 1.3 + ALPN h2 且域名有效) 将被高亮并置顶显示。
+- **实时数据流**: 探测结果通过 WebSocket 实时传输。“协议匹配”表示节点支持 TLS 1.3、ALPN h2 且证书元数据可解析，不等同于证书可信或服务安全。
+- **证书证据标签**: 扫描器解析 SAN、真实生效/到期时间，并独立验证公共信任链、自签名和输入域名匹配。品牌标签只使用精确 SAN 域名后缀，网络关系区分品牌直连、CDN/边缘、公有云和第三方承载；悬浮标签可查看判定依据。
 - **数据库历史**: 切换到 “Database (节点图库)” 标签页，可以查看、筛选 (按地区/域名) 或删除 SQLite 数据库中之前发现的可用节点。
 - **CSV 导出**: 历史页顶部的导出按钮会按当前筛选条件导出结果。
 - **ASN 悬浮画像**: IP 悬浮窗会读取 Cloudflare Radar，展示 ASN 的 HTTP 画像、BGP hijack/route leak/RPKI 摘要，以及 L7/L3 攻击分布。
@@ -99,7 +100,7 @@ docker run -d -p 3000:3000 \
 - **后端**: Rust, Axum, Tokio, tokio-rustls, sqlx (SQLite)。
 - **前端**: 原生 JavaScript (ES6+), CSS3 (Flexbox/Grid, Backdrop-filter), HTML5, WebSocket API。
 - **数据库**:
-  - `scan_results`: 存储健康且可行的节点，及其 ALPN、证书颁发机构和地理位置数据。
+  - `scan_results`: 存储协议匹配节点，以及 ALPN、SAN、证书验证状态、有效期、ASN 和地理位置证据。
   - `scan_history`: 跟踪扫描进度、总任务数和完成时间，以支持精确的断点续扫和 30 天防滥用缓存。
 
 ## 免责声明

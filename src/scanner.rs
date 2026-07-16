@@ -1,22 +1,41 @@
 use maxminddb::Reader;
 use rustls::{
-    DigitallySignedStruct,
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    CertificateError, DigitallySignedStruct, RootCertStore,
+    client::{
+        WebPkiServerVerifier,
+        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    },
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::TlsConnector;
-use x509_parser::parse_x509_certificate;
+use x509_parser::{extensions::GeneralName, parse_x509_certificate, prelude::X509Certificate};
 
 use crate::models::ScanResult;
 
 #[derive(Debug)]
 pub struct DummyVerifier;
+
+#[derive(Clone)]
+pub struct ScanResources {
+    pub tls_connector: TlsConnector,
+    pub certificate_verifier: Arc<WebPkiServerVerifier>,
+    pub geo_reader: Option<Arc<Reader<Vec<u8>>>>,
+    pub asn_reader: Option<Arc<Reader<Vec<u8>>>>,
+}
+
+pub fn trusted_certificate_verifier() -> Arc<WebPkiServerVerifier> {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    WebPkiServerVerifier::builder(Arc::new(roots))
+        .build()
+        .expect("webpki root store must not be empty")
+}
 
 impl ServerCertVerifier for DummyVerifier {
     fn verify_server_cert(
@@ -148,6 +167,13 @@ pub fn default_fail_result(
         cert_publickey: "".into(),
         cert_domain: "".into(),
         cert_issuer: "".into(),
+        cert_sans: Vec::new(),
+        cert_not_before: 0,
+        cert_not_after: 0,
+        cert_chain_trusted: false,
+        cert_hostname_match: "unknown".into(),
+        cert_self_signed: "unknown".into(),
+        cert_validation: "missing".into(),
         geo_code,
         asn_number,
         asn_org,
@@ -163,10 +189,14 @@ pub async fn scan_tls(
     origin: String,
     port: u16,
     timeout_secs: u64,
-    tls_connector: TlsConnector,
-    geo_reader: Option<Arc<Reader<Vec<u8>>>>,
-    asn_reader: Option<Arc<Reader<Vec<u8>>>>,
+    resources: ScanResources,
 ) -> ScanResult {
+    let ScanResources {
+        tls_connector,
+        certificate_verifier,
+        geo_reader,
+        asn_reader,
+    } = resources;
     let mut geo_code = "N/A".to_string();
     if let Some(geo) = &geo_reader
         && let Ok(country) = geo.lookup::<maxminddb::geoip2::Country>(ip)
@@ -209,6 +239,7 @@ pub async fn scan_tls(
     };
 
     let server_name = server_name_for_origin(&origin, ip);
+    let verification_name = server_name.clone();
 
     let tls_future = tls_connector.connect(server_name, tcp_stream);
     let tls_stream = match timeout(Duration::from_secs(timeout_secs), tls_future).await {
@@ -250,6 +281,10 @@ pub async fn scan_tls(
     let mut cert_signature = String::new();
     let mut cert_publickey = String::new();
     let mut cert_validity = String::new();
+    let mut cert_sans = Vec::new();
+    let mut cert_not_before = 0;
+    let mut cert_not_after = 0;
+    let mut cert_self_signed = "unknown".to_string();
 
     if let Some(leaf) = certs.first()
         && let Ok((_, parsed_cert)) = parse_x509_certificate(leaf.as_ref())
@@ -262,15 +297,26 @@ pub async fn scan_tls(
             parsed_cert.tbs_certificate.subject_pki.algorithm.algorithm
         );
         let validity = &parsed_cert.validity;
-        let not_before = validity.not_before.timestamp();
-        let not_after = validity.not_after.timestamp();
-        if not_after > not_before {
-            let days = (not_after - not_before) / 86400;
+        cert_not_before = validity.not_before.timestamp();
+        cert_not_after = validity.not_after.timestamp();
+        let now = unix_timestamp();
+        if now < cert_not_before {
+            cert_validity = "Not Yet Valid".to_string();
+        } else if now >= cert_not_after {
+            cert_validity = "Expired".to_string();
+        } else if cert_not_after > cert_not_before {
+            let days = (cert_not_after - now + 86_399) / 86_400;
             cert_validity = format!("{} Days", days);
         } else {
-            cert_validity = "Expired/Invalid".to_string();
+            cert_validity = "Invalid".to_string();
         }
+        cert_sans = extract_certificate_sans(&parsed_cert);
+        cert_self_signed = self_signed_status(&parsed_cert).to_string();
     }
+
+    let (cert_chain_trusted, cert_validation) =
+        validate_certificate_chain(&certificate_verifier, certs, &verification_name);
+    let cert_hostname_match = hostname_match_status(&origin, &cert_sans).to_string();
 
     let feasible = tls_version == "TLS 1.3"
         && alpn == "h2"
@@ -299,6 +345,13 @@ pub async fn scan_tls(
         cert_publickey,
         cert_domain,
         cert_issuer,
+        cert_sans,
+        cert_not_before,
+        cert_not_after,
+        cert_chain_trusted,
+        cert_hostname_match,
+        cert_self_signed,
+        cert_validation,
         geo_code,
         asn_number,
         asn_org,
@@ -307,6 +360,122 @@ pub async fn scan_tls(
         failure_reason,
         feasible,
     }
+}
+
+fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn extract_certificate_sans(cert: &X509Certificate<'_>) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(Some(extension)) = cert.subject_alternative_name() {
+        for name in &extension.value.general_names {
+            let value = match name {
+                GeneralName::DNSName(value) => {
+                    Some(value.trim_end_matches('.').to_ascii_lowercase())
+                }
+                GeneralName::IPAddress(bytes) if bytes.len() == 4 => Some(
+                    std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]).to_string(),
+                ),
+                GeneralName::IPAddress(bytes) if bytes.len() == 16 => {
+                    let octets: [u8; 16] = match (*bytes).try_into() {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    };
+                    Some(std::net::Ipv6Addr::from(octets).to_string())
+                }
+                _ => None,
+            };
+            if let Some(value) = value
+                && !names.contains(&value)
+            {
+                names.push(value);
+            }
+        }
+    }
+    names
+}
+
+fn self_signed_status(cert: &X509Certificate<'_>) -> &'static str {
+    if normalize_dn(&cert.subject().to_string()) != normalize_dn(&cert.issuer().to_string()) {
+        return "no";
+    }
+    if cert.verify_signature(None).is_ok() {
+        "verified"
+    } else {
+        "suspected"
+    }
+}
+
+fn normalize_dn(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
+fn validate_certificate_chain(
+    verifier: &WebPkiServerVerifier,
+    certs: &[CertificateDer<'_>],
+    server_name: &ServerName<'_>,
+) -> (bool, String) {
+    let Some((leaf, intermediates)) = certs.split_first() else {
+        return (false, "missing".to_string());
+    };
+
+    match verifier.verify_server_cert(leaf, intermediates, server_name, &[], UnixTime::now()) {
+        Ok(_) => (true, "trusted".to_string()),
+        Err(rustls::Error::InvalidCertificate(CertificateError::NotValidForName)) => {
+            (true, "name_mismatch".to_string())
+        }
+        Err(rustls::Error::InvalidCertificate(CertificateError::Expired)) => {
+            (false, "expired".to_string())
+        }
+        Err(rustls::Error::InvalidCertificate(CertificateError::NotValidYet)) => {
+            (false, "not_yet_valid".to_string())
+        }
+        Err(rustls::Error::InvalidCertificate(CertificateError::UnknownIssuer)) => {
+            (false, "untrusted_issuer".to_string())
+        }
+        Err(rustls::Error::InvalidCertificate(CertificateError::BadSignature)) => {
+            (false, "bad_signature".to_string())
+        }
+        Err(_) => (false, "invalid".to_string()),
+    }
+}
+
+fn hostname_match_status(origin: &str, sans: &[String]) -> &'static str {
+    if origin.parse::<IpAddr>().is_ok() {
+        return "not_applicable";
+    }
+    if sans.is_empty() {
+        return "unknown";
+    }
+
+    let hostname = origin.trim().trim_end_matches('.').to_ascii_lowercase();
+    if sans.iter().any(|san| dns_name_matches(&hostname, san)) {
+        "matched"
+    } else {
+        "mismatched"
+    }
+}
+
+fn dns_name_matches(hostname: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim().trim_end_matches('.').to_ascii_lowercase();
+    if hostname == pattern {
+        return true;
+    }
+    let Some(suffix) = pattern.strip_prefix("*.") else {
+        return false;
+    };
+    let Some(prefix) = hostname.strip_suffix(suffix) else {
+        return false;
+    };
+    prefix.ends_with('.') && !prefix[..prefix.len() - 1].contains('.')
 }
 
 fn server_name_for_origin(origin: &str, ip: IpAddr) -> ServerName<'static> {
@@ -351,5 +520,24 @@ mod tests {
         let server_name = server_name_for_origin("not a dns name", "192.0.2.1".parse().unwrap());
 
         assert_eq!(server_name.to_str(), "192.0.2.1");
+    }
+
+    #[test]
+    fn dns_name_matching_only_allows_one_wildcard_label() {
+        assert!(dns_name_matches("c.docs.google.com", "*.docs.google.com"));
+        assert!(!dns_name_matches(
+            "nested.c.docs.google.com",
+            "*.docs.google.com"
+        ));
+        assert!(!dns_name_matches("google.com.evil.org", "*.google.com"));
+    }
+
+    #[test]
+    fn hostname_match_uses_san_and_skips_raw_ip_discovery() {
+        let sans = vec!["*.docs.google.com".to_string()];
+
+        assert_eq!(hostname_match_status("c.docs.google.com", &sans), "matched");
+        assert_eq!(hostname_match_status("example.com", &sans), "mismatched");
+        assert_eq!(hostname_match_status("192.0.2.1", &sans), "not_applicable");
     }
 }

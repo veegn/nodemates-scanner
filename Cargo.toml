@@ -11,7 +11,8 @@ serde_json = "1.0"
 rustls = { version = "0.22", default-features = false, features = ["ring"] }
 tokio-rustls = "0.25"
 rustls-pki-types = "1.4"
-x509-parser = "0.16"
+x509-parser = { version = "0.16", features = ["verify"] }
+webpki-roots = "0.26"
 maxminddb = "0.24"
 ipnet = "2.9"
 futures = "0.3"

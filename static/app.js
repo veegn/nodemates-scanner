@@ -18,7 +18,7 @@ const translations = {
         btnStop: "Stop Scanning",
         btnSaveSettings: "Save Settings",
         statScanned: "Scanned",
-        statFeasible: "Feasible",
+        statFeasible: "Protocol Matches",
         taskEyebrow: "Current Task",
         taskIdle: "Ready to scan",
         taskPreparing: "Preparing scan",
@@ -70,8 +70,8 @@ const translations = {
         setPorts: "Allowed Ports",
         alertNoPort: "Please select at least one port.",
         alertDeleteConfirm: "Delete result for {ip}?",
-        badgeFeasible: "Feasible",
-        badgeFailed: "Invalid",
+        badgeFeasible: "Protocol Match",
+        badgeFailed: "Protocol Mismatch",
         btnBack: "Back",
         settingsTitle: "System Settings",
         radarLoading: "Loading...",
@@ -114,7 +114,7 @@ const translations = {
         btnStop: "停止扫描",
         btnSaveSettings: "保存设置",
         statScanned: "已扫描数",
-        statFeasible: "健康节点数",
+        statFeasible: "协议匹配数",
         taskEyebrow: "当前任务",
         taskIdle: "等待扫描",
         taskPreparing: "正在准备扫描",
@@ -166,8 +166,8 @@ const translations = {
         setPorts: "允许扫描的端口 (逗号分隔)",
         alertNoPort: "请至少选择一个扫描端口。",
         alertDeleteConfirm: "确定要删除 {ip} 的记录吗？",
-        badgeFeasible: "可用",
-        badgeFailed: "无效",
+        badgeFeasible: "协议匹配",
+        badgeFailed: "协议不匹配",
         btnBack: "返回",
         settingsTitle: "系统设置",
         radarLoading: "加载中...",
@@ -715,75 +715,53 @@ function extractCN(dn) {
     return match ? match[1].trim() : dn;
 }
 
-function appendDomainCell(tr, fullDomain, fullIssuer, asnOrg) {
+const { buildCertificateBadges, formatCertificateValidity } = window.LabelRules;
+
+function appendDomainCell(tr, row) {
     const td = document.createElement('td');
-    td.style.maxWidth = '200px';
-    td.style.whiteSpace = 'nowrap';
-    td.style.overflow = 'hidden';
-    td.style.textOverflow = 'ellipsis';
-    td.title = fullDomain || '';
+    td.className = 'domain-cell';
+
+    const fullDomain = row.cert_domain || row.failure_reason || '';
+    const sans = Array.isArray(row.cert_sans) ? row.cert_sans : [];
+    const titleParts = [];
+    if (fullDomain) titleParts.push(`Subject: ${fullDomain}`);
+    if (sans.length) titleParts.push(`SAN: ${sans.join(', ')}`);
+    td.title = titleParts.join('\n');
     
     const cleanDomain = extractCN(fullDomain);
     const span = document.createElement('span');
+    span.className = 'domain-value';
     span.textContent = cleanDomain;
     td.appendChild(span);
-    
-    if (fullDomain) {
-        const dUpper = fullDomain.toUpperCase();
-        const fakeKeywords = ['TRAEFIK DEFAULT CERT', 'KUBERNETES INGRESS', 'LOCALHOST', 'FAKE'];
-        const popularDest = ['CLOUDFLARE', 'GOOGLE', 'APPLE', 'MICROSOFT', 'BING', 'ITUNES', 'AKAMAI', 'FASTLY', 'AMAZON', 'AWS'];
-        
-        let badgeText = null;
-        let badgeType = null; // 'warning' or 'info' or 'danger'
-        
-        if (fakeKeywords.some(k => dUpper.includes(k))) {
-            badgeText = currentLang === 'zh' ? '伪造' : 'Fake';
-            badgeType = 'warning';
-        } else if (fullDomain === fullIssuer) {
-            badgeText = currentLang === 'zh' ? '自签' : 'Self-Signed';
-            badgeType = 'warning';
-        } else if (popularDest.some(k => dUpper.includes(k))) {
-            const orgUpper = (asnOrg || '').toUpperCase();
-            const domainKeyword = popularDest.find(k => dUpper.includes(k));
-            
-            if (orgUpper && !orgUpper.includes(domainKeyword) && !orgUpper.includes('CLOUDFLARE') && !orgUpper.includes('GOOGLE') && !orgUpper.includes('AKAMAI')) {
-                badgeText = currentLang === 'zh' ? '高可疑/伪造' : 'High Suspicion/Fake';
-                badgeType = 'danger';
-            } else {
-                badgeText = currentLang === 'zh' ? '大厂/疑似转发' : 'CDN/Proxy';
-                badgeType = 'info';
-            }
-        }
-        
-        if (badgeText) {
+
+    const badges = buildCertificateBadges(row);
+    if (badges.length) {
+        const badgeGroup = document.createElement('div');
+        badgeGroup.className = 'domain-badges';
+        for (const item of badges) {
             const badge = document.createElement('span');
-            badge.className = `badge badge-${badgeType}`;
-            badge.style.marginLeft = '0.4rem';
-            badge.style.fontSize = '0.65rem';
-            badge.style.padding = '0.15rem 0.35rem';
-            badge.style.borderRadius = '4px';
-            badge.style.verticalAlign = 'middle';
-            
-            if (badgeType === 'warning') {
-                badge.style.background = 'rgba(255, 149, 0, 0.15)';
-                badge.style.color = '#FF9500';
-                badge.style.border = '1px solid rgba(255, 149, 0, 0.3)';
-            } else if (badgeType === 'info') {
-                badge.style.background = 'rgba(41, 151, 255, 0.15)';
-                badge.style.color = 'var(--accent-primary)';
-                badge.style.border = '1px solid rgba(41, 151, 255, 0.3)';
-            } else if (badgeType === 'danger') {
-                badge.style.background = 'rgba(255, 59, 48, 0.15)';
-                badge.style.color = '#FF3B30';
-                badge.style.border = '1px solid rgba(255, 59, 48, 0.3)';
-            }
-            
-            badge.textContent = badgeText;
-            td.appendChild(badge);
+            badge.className = `badge badge-inline badge-${item.type}`;
+            badge.textContent = currentLang === 'zh' ? item.zh : item.en;
+            badge.title = currentLang === 'zh' ? item.evidenceZh : item.evidenceEn;
+            badgeGroup.appendChild(badge);
         }
+        td.appendChild(badgeGroup);
     }
-    
+
     tr.appendChild(td);
+    return td;
+}
+
+function appendValidityCell(tr, row) {
+    const td = appendTextCell(tr, formatCertificateValidity(row, currentLang));
+    const notBefore = Number(row.cert_not_before || 0);
+    const notAfter = Number(row.cert_not_after || 0);
+    if (notBefore || notAfter) {
+        const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+        const start = notBefore ? new Date(notBefore * 1000).toLocaleString(locale) : '-';
+        const end = notAfter ? new Date(notAfter * 1000).toLocaleString(locale) : '-';
+        td.title = `${start} - ${end}`;
+    }
     return td;
 }
 
@@ -1037,7 +1015,7 @@ async function fetchHistoryTasks() {
 function renderTaskResults(container, data) {
     clearChildren(container);
     if (data.length === 0) {
-        container.innerHTML = '<div style="padding: 1rem; color: var(--text-secondary);">No feasible nodes found in this scan.</div>';
+        container.innerHTML = `<div style="padding: 1rem; color: var(--text-secondary);">${currentLang === 'zh' ? '本次扫描没有协议匹配节点。' : 'No protocol-matching nodes found in this scan.'}</div>`;
         return;
     }
 
@@ -1069,8 +1047,8 @@ function renderTaskResults(container, data) {
         appendTextCell(tr, String(row.port));
         appendLatencyCell(tr, row.latency);
         appendTextCell(tr, row.tls_version);
-        appendDomainCell(tr, row.cert_domain, row.cert_issuer, row.asn_org);
-        appendTextCell(tr, row.cert_validity);
+        appendDomainCell(tr, row);
+        appendValidityCell(tr, row);
         appendTextCell(tr, row.alpn);
         appendIssuerCell(tr, row.cert_issuer);
         const localScannedAt = formatLocalTime(row.scanned_at);
@@ -1414,8 +1392,8 @@ function addResultRow(result) {
     appendTextCell(tr, String(result.port));
     appendLatencyCell(tr, result.latency);
     appendTextCell(tr, result.tls_version);
-    appendDomainCell(tr, result.cert_domain || result.failure_reason, result.cert_issuer, result.asn_org);
-    appendTextCell(tr, result.cert_validity);
+    appendDomainCell(tr, result);
+    appendValidityCell(tr, result);
     appendTextCell(tr, result.alpn);
     appendIssuerCell(tr, result.cert_issuer);
 
